@@ -9,6 +9,10 @@ import { handleDeepSeekCompletion } from './deepseek.js';
 import { getQueueInfo } from './queue.js';
 import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChatLogs, listLogDates } from './logger.js';
 import { getMetrics, getTimeseries } from './metrics.js';
+import {
+  hasApiKeys, isValidApiKey, listApiKeysMasked, addApiKey, removeApiKeyById,
+  panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
+} from './access.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -20,29 +24,34 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 
-// Request logging (writes to /srv/threadripper-backups/newapi/logs/deepseek-2api/)
+// Request logging (writes to LOG_DIR or its default)
 app.use(requestLogger('deepseek-2api'));
 
-// API Key auth middleware
-app.use((req, res, next) => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return next();
-  if (req.method === 'GET' && req.path === '/admin') return next();
-
+// ---- Auth helpers ---------------------------------------------------------
+function bearerToken(req) {
   const auth = req.headers['authorization'];
-  if (auth === `Bearer ${apiKey}`) return next();
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return null;
+}
 
+// API key auth — guards only the proxy API endpoints. Open when no key configured.
+function apiKeyAuth(req, res, next) {
+  if (!hasApiKeys()) return next();
+  const key = bearerToken(req);
+  if (key && isValidApiKey(key)) return next();
   res.status(401).json({ error: { message: 'Invalid API key' } });
-});
+}
 
-// OpenAI format
-app.post('/v1/chat/completions', handleOpenAICompletion);
-app.get('/v1/models', handleOpenAIModels);
+// Panel auth — guards the admin/performance management APIs. Open when no panel
+// password configured (so the first-run setup can set one).
+function panelAuth(req, res, next) {
+  if (!panelAuthRequired()) return next();
+  const token = bearerToken(req) || req.headers['x-panel-token'];
+  if (token && isValidPanelSession(token)) return next();
+  res.status(401).json({ error: { message: 'Panel authentication required' } });
+}
 
-// DeepSeek native format
-app.post('/api/v0/chat/completion', handleDeepSeekCompletion);
-
-// Health check + pool info
+// ---- Health check (public) ------------------------------------------------
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -53,11 +62,41 @@ app.get('/', (req, res) => {
   });
 });
 
-// Admin panel
+// ---- Proxy API (API key auth) --------------------------------------------
+// OpenAI format
+app.post('/v1/chat/completions', apiKeyAuth, handleOpenAICompletion);
+app.get('/v1/models', apiKeyAuth, handleOpenAIModels);
+// DeepSeek native format
+app.post('/api/v0/chat/completion', apiKeyAuth, handleDeepSeekCompletion);
+
+// ---- Panel pages (HTML, public) ------------------------------------------
 app.get('/admin', (req, res) => {
   res.sendFile(join(__dirname, 'admin', 'index.html'));
 });
+app.get('/performance', (req, res) => {
+  res.sendFile(join(__dirname, 'performance', 'index.html'));
+});
 
+// ---- Public panel endpoints (must be registered BEFORE the panelAuth guard)
+app.get('/admin/api/config', (req, res) => {
+  res.json(getAccessConfig());
+});
+
+app.post('/admin/api/login', (req, res) => {
+  if (!panelAuthRequired()) {
+    return res.json({ success: true, token: null, panelAuthRequired: false });
+  }
+  const { password } = req.body || {};
+  if (verifyPanelPassword(password)) {
+    return res.json({ success: true, token: createPanelSession() });
+  }
+  res.status(401).json({ error: { message: 'Incorrect panel password' } });
+});
+
+// ---- Everything else under /admin/api and /performance/api needs panel auth
+app.use(['/admin/api', '/performance/api'], panelAuth);
+
+// Admin: stats & logs
 app.get('/admin/api/stats', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
   res.json({
@@ -94,6 +133,7 @@ app.get('/admin/api/logs/chats', (req, res) => {
   res.json({ chats: readChatLogs(date, count) });
 });
 
+// Admin: DeepSeek token management (hot-reload)
 app.post('/admin/api/token/add', async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') {
@@ -120,11 +160,45 @@ app.post('/admin/api/token/login', async (req, res) => {
   }
 });
 
-// Performance monitoring
-app.get('/performance', (req, res) => {
-  res.sendFile(join(__dirname, 'performance', 'index.html'));
+// Admin: API key management (hot-reload)
+app.get('/admin/api/apikeys', (req, res) => {
+  res.json({ keys: listApiKeysMasked() });
 });
 
+app.post('/admin/api/apikeys/add', (req, res) => {
+  const { key } = req.body || {};
+  try {
+    const result = addApiKey(key);
+    if (!result.added) {
+      return res.status(409).json({ error: { message: 'API key already exists' } });
+    }
+    res.json({ success: true, generated: !!result.generated, key: result.key });
+  } catch (err) {
+    res.status(400).json({ error: { message: err.message } });
+  }
+});
+
+app.post('/admin/api/apikeys/remove', (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ error: { message: 'id required' } });
+  const removed = removeApiKeyById(id);
+  if (!removed) return res.status(404).json({ error: { message: 'API key not found' } });
+  res.json({ success: true });
+});
+
+// Admin: panel password (set / change). Open until a password is set (first-run).
+app.post('/admin/api/password/set', (req, res) => {
+  const { oldPassword, newPassword } = req.body || {};
+  try {
+    setPanelPassword(newPassword, oldPassword);
+    // Issue a fresh session so the caller stays authenticated after the change.
+    res.json({ success: true, token: createPanelSession() });
+  } catch (err) {
+    res.status(400).json({ error: { message: err.message } });
+  }
+});
+
+// Performance monitoring
 app.get('/performance/api/metrics', (req, res) => {
   res.json(getMetrics());
 });

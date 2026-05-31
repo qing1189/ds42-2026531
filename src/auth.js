@@ -1,10 +1,5 @@
 import { config } from 'dotenv';
-import { readFileSync, writeFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ENV_PATH = resolve(__dirname, '..', '.env');
+import { updateEnvVars } from './env_store.js';
 
 config();
 
@@ -46,7 +41,7 @@ function generateDeviceId() {
 }
 
 if (tokens.length === 0 && accounts.length === 0) {
-  throw new Error('No DS_TOKEN/DS_TOKENS or DS_ACCOUNTS configured');
+  console.warn('⚠️  No DS_TOKEN/DS_TOKENS or DS_ACCOUNTS configured — starting with an empty token pool. Add a token or account later via the admin panel (/admin); changes take effect immediately (hot-reload).');
 }
 
 // DS_ACCOUNTS_EXTENDED=email:password:token_prefix — links existing tokens to accounts
@@ -384,27 +379,9 @@ export async function loginAndAddToken(email, password) {
 }
 
 function persistTokensToEnv() {
-  try {
-    let content = readFileSync(ENV_PATH, 'utf-8');
-    const aliveTokens = tokenPool.filter(t => t.token && !t.dead).map(t => t.token);
-    if (aliveTokens.length === 0) return;
-
-    const line = `DS_TOKENS=${aliveTokens.join(',')}`;
-    const lines = content.split(/\r?\n/);
-    let found = false;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('DS_TOKENS=')) {
-        lines[i] = line;
-        found = true;
-        break;
-      }
-    }
-    if (!found) lines.push(line);
-
-    writeFileSync(ENV_PATH, lines.join('\n'));
-  } catch (err) {
-    console.warn('Failed to persist tokens to .env:', err.message);
-  }
+  const aliveTokens = tokenPool.filter(t => t.token && !t.dead).map(t => t.token);
+  if (aliveTokens.length === 0) return;
+  updateEnvVars({ DS_TOKENS: aliveTokens.join(',') });
 }
 
 export async function addTokenToPool(tokenStr) {
