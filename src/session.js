@@ -73,6 +73,22 @@ export function getSessionInfo() {
   return { count: sessionPool.size, ttl: SESSION_TTL, sessions: entries };
 }
 
+// Delete a single cached session by its cache key (hot-reload).
+export function deleteSession(cacheKey) {
+  if (!sessionPool.has(cacheKey)) {
+    return { success: false, message: `会话 ${cacheKey} 不存在` };
+  }
+  sessionPool.delete(cacheKey);
+  return { success: true, message: `会话 ${cacheKey} 已删除` };
+}
+
+// Clear the entire session cache (hot-reload).
+export function clearAllSessions() {
+  const count = sessionPool.size;
+  sessionPool.clear();
+  return { success: true, message: `已清空 ${count} 个会话缓存` };
+}
+
 export async function prewarmSessions(tokens, modelTypes = ['default', 'expert']) {
   const { getPoolInfo } = await import('./auth.js');
   const poolInfo = getPoolInfo();

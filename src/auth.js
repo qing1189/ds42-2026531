@@ -99,14 +99,22 @@ for (const acct of accounts) {
 
 import { loginHeaders, getHeaders, getDeviceId, proxiedFetch, getDeviceIdForToken } from './headers.js';
 
-async function login(email, password) {
+async function login(account, password) {
   // Use a fresh deviceId for login — real browser gets it from portal101.cn device fingerprint
   const loginDeviceId = 'B' + generateDeviceId();
+
+  // `account` may be an email or a phone number. DeepSeek expects a phone number
+  // in the "mobile" field and an email in the "email" field.
+  const normalized = account.trim();
+  const isPhone = /^\+?\d{6,15}$/.test(normalized.replace(/[\s-]/g, ''));
+  const loginBody = isPhone
+    ? { email: '', mobile: normalized.replace(/[\s-]/g, ''), password, area_code: '', device_id: loginDeviceId, os: 'web' }
+    : { email: normalized, mobile: '', password, area_code: '', device_id: loginDeviceId, os: 'web' };
 
   const res = await proxiedFetch(`${BASE_URL}/api/v0/users/login`, {
     method: 'POST',
     headers: loginHeaders(),
-    body: JSON.stringify({ email, mobile: '', password, area_code: '', device_id: loginDeviceId, os: 'web' }),
+    body: JSON.stringify(loginBody),
   });
 
   // AWS WAF returns 202 with empty body — can't login from this IP
@@ -118,18 +126,18 @@ async function login(email, password) {
   if (!text) throw new Error('Empty response from login endpoint');
 
   const json = JSON.parse(text);
-  if (json.code !== 0) throw new Error(`Login failed for ${email}: ${json.msg || JSON.stringify(json)}`);
+  if (json.code !== 0) throw new Error(`Login failed for ${account}: ${json.msg || JSON.stringify(json)}`);
 
   const bizCode = json.data?.biz_code;
   if (bizCode === 10) {
-    throw new Error(`Account banned: ${email}`);
+    throw new Error(`Account banned: ${account}`);
   }
   if (bizCode === 11) {
-    throw new Error(`Account requires verification: ${email}`);
+    throw new Error(`Account requires verification: ${account}`);
   }
 
   const token = json.data?.biz_data?.user?.token;
-  if (!token) throw new Error(`Login succeeded but no token returned for ${email}`);
+  if (!token) throw new Error(`Login succeeded but no token returned for ${account}`);
   return token;
 }
 
@@ -378,9 +386,11 @@ export async function loginAndAddToken(email, password) {
   return token;
 }
 
-function persistTokensToEnv() {
+function persistTokensToEnv({ allowEmpty = false } = {}) {
   const aliveTokens = tokenPool.filter(t => t.token && !t.dead).map(t => t.token);
-  if (aliveTokens.length === 0) return;
+  // Don't wipe DS_TOKENS during the conservative auto-path (e.g. all tokens
+  // transiently invalid at startup). Explicit removals pass allowEmpty=true.
+  if (aliveTokens.length === 0 && !allowEmpty) return;
   updateEnvVars({ DS_TOKENS: aliveTokens.join(',') });
 }
 
@@ -393,6 +403,79 @@ export async function addTokenToPool(tokenStr) {
   tokenPool.push(entry);
   persistTokensToEnv();
   return entry;
+}
+
+// === Account management (hot-reload, no restart needed) ===
+
+// Add an account (email or phone number) to the pool: login immediately,
+// get a token, and register it. Re-uses/refreshes an existing entry if present.
+export async function addAccountToPool(account, password) {
+  const trimmed = account.trim();
+  const accountKey = trimmed.includes('@') ? trimmed.toLowerCase() : trimmed;
+  const existing = tokenPool.find(t => t.email === accountKey);
+  if (existing) {
+    if (existing.dead || !existing.token) {
+      existing.password = password;
+      const ok = await refreshToken(existing);
+      if (!ok) throw new Error(`账号 ${accountKey} 登录失败`);
+      persistTokensToEnv();
+      return { email: accountKey, token: existing.token.slice(0, 12) + '...', visionCapable: existing.visionCapable, refreshed: true };
+    }
+    return { email: accountKey, token: existing.token.slice(0, 12) + '...', visionCapable: existing.visionCapable, refreshed: false, message: '账号已在池中' };
+  }
+
+  const token = await login(accountKey, password);
+  const vision = await checkVisionCapability(token);
+  const entry = { token, email: accountKey, password, visionCapable: vision, lastUsed: 0, errorCount: 0, activeRequests: 0, dead: false };
+  tokenPool.push(entry);
+  persistTokensToEnv();
+  console.log(`[HotReload] Added account ${accountKey}: ${token.slice(0, 12)}... vision=${vision}`);
+  return { email: accountKey, token: token.slice(0, 12) + '...', visionCapable: vision, refreshed: false };
+}
+
+// List all pool entries that originate from an account (email or phone).
+export function listAccounts() {
+  return tokenPool
+    .filter(t => t.email)
+    .map(t => ({
+      email: t.email,
+      token: t.token ? t.token.slice(0, 12) + '...' : 'NONE',
+      visionCapable: t.visionCapable,
+      errorCount: t.errorCount,
+      activeRequests: t.activeRequests,
+      dead: t.dead,
+      maxConcurrent: MAX_CONCURRENT_PER_TOKEN,
+    }));
+}
+
+// Remove an account (and its token) from the pool (hot-reload).
+export function removeAccountFromPool(account) {
+  const trimmed = account.trim();
+  const accountKey = trimmed.includes('@') ? trimmed.toLowerCase() : trimmed;
+  const idx = tokenPool.findIndex(t => t.email === accountKey);
+  if (idx === -1) return { success: false, message: `账号 ${accountKey} 不在池中` };
+  const entry = tokenPool[idx];
+  if (entry.activeRequests > 0) return { success: false, message: `账号 ${accountKey} 有活跃请求，暂不能删除` };
+  tokenPool.splice(idx, 1);
+  if (entry.token) invalidateTokenSessions(entry.token);
+  persistTokensToEnv({ allowEmpty: true });
+  console.log(`[HotReload] Removed account ${accountKey} (and its token) from pool`);
+  return { success: true, message: `账号 ${accountKey} 已删除` };
+}
+
+// Remove a token from the pool by its prefix (hot-reload).
+export function removeTokenFromPool(tokenPrefix) {
+  const trimmed = tokenPrefix.trim();
+  const idx = tokenPool.findIndex(t => t.token && t.token.startsWith(trimmed));
+  if (idx === -1) return { success: false, message: `令牌 ${trimmed}... 不在池中` };
+  const entry = tokenPool[idx];
+  if (entry.activeRequests > 0) return { success: false, message: `令牌 ${trimmed}... 有活跃请求，暂不能删除` };
+  const tokenStr = entry.token;
+  tokenPool.splice(idx, 1);
+  if (tokenStr) invalidateTokenSessions(tokenStr);
+  persistTokensToEnv({ allowEmpty: true });
+  console.log(`[HotReload] Removed token ${trimmed}... from pool`);
+  return { success: true, message: `令牌 ${trimmed}... 已删除` };
 }
 
 // Periodic health check — validate alive tokens and detect banned accounts early

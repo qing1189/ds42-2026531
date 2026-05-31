@@ -146,7 +146,7 @@ curl http://localhost:3000/v1/chat/completions \
 
 - **多 API Key**：可配置任意数量，逐个独立校验；在面板中新增、删除或自动生成，**立即生效（热加载）**。未配置任何 Key 时 `/v1`、`/api/v0` 不鉴权。
 - **独立面板密码**：与 API Key 完全分离。设置后访问面板需登录（会话有效期 24h）；修改密码需提供当前密码并使现有登录失效。留空则面板无需登录（便于首次进入设置密码）。
-- **DeepSeek 令牌热加载**：在面板「令牌管理」中粘贴 token 或用账号登录，立即加入令牌池。
+- **账号与令牌热加载**：在面板中可用 **邮箱或手机号** + 密码登录添加账号，或直接粘贴 token；账号、令牌、会话缓存均可在面板中删除，会话缓存还支持「清空全部」。所有操作立即生效，无需重启。
 - **持久化**：通过面板添加的 token / API Key / 面板密码会回写到 `.env`，重启后仍生效（前提是 `.env` 可写，见下方 Docker 持久化说明）。
 
 ---
@@ -240,12 +240,27 @@ npm start              # 或 npm run dev（--watch 热重载）
 
 - **管理面板**：`http://localhost:3000/admin`
   - 查看池 / 队列 / 会话 / 日志统计，查看历史对话。
-  - 在线添加 DeepSeek token、账号登录（热加载）。
+  - **账号管理**：使用 **邮箱或手机号** + 密码登录添加账号，列表展示，支持删除（热加载，删除账号会一并移除其令牌）。
+  - **令牌管理**：粘贴 token 添加；令牌池列表支持逐个删除（热加载）。
+  - **会话缓存**：列表展示，支持单条删除与「清空全部」。
   - **API Key 管理**：增删 / 自动生成客户端密钥（热加载）。
   - **面板密码**：设置 / 修改面板登录密码（与 API Key 独立）。
 - **性能监控**：`http://localhost:3000/performance`
   - RPM、TTFB（P50/P90）、token 速度、会话命中率与时序图。
   - 设置面板密码后，两个页面均需用面板密码登录。
+
+### 管理 API（均需面板密码鉴权）
+
+| 方法 / 路径 | 说明 |
+|------|------|
+| `POST /admin/api/account/add` | 添加账号（`email` 字段支持邮箱或手机号）+ `password`，登录并入池 |
+| `GET /admin/api/accounts` | 列出池中所有账号 |
+| `POST /admin/api/account/remove` | 删除账号及其令牌（`email`，支持邮箱/手机号） |
+| `POST /admin/api/token/add` | 粘贴 token 添加 |
+| `POST /admin/api/token/remove` | 按令牌前缀删除（`tokenPrefix`） |
+| `POST /admin/api/session/delete` | 删除单条会话缓存（`cacheKey`） |
+| `POST /admin/api/session/clear` | 清空全部会话缓存 |
+| `GET/POST /admin/api/apikeys[...]` | API Key 列表 / 增删 |
 
 ---
 
