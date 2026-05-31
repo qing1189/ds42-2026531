@@ -304,10 +304,10 @@ footer {
     <div style="overflow-x:auto">
       <table>
         <thead>
-          <tr><th>令牌</th><th>视觉能力</th><th>错误数</th><th>活跃/最大</th><th>健康</th></tr>
+          <tr><th>令牌</th><th>视觉能力</th><th>错误数</th><th>活跃/最大</th><th>健康</th><th>操作</th></tr>
         </thead>
         <tbody id="poolBody">
-          <tr><td colspan="5" class="loading">加载中...</td></tr>
+          <tr><td colspan="6" class="loading">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -316,14 +316,17 @@ footer {
   <!-- 会话缓存 -->
   <div class="card">
     <h2>会话缓存</h2>
-    <div id="sessionSummary" style="font-size:0.88em;color:var(--text-dim);margin-bottom:8px">-</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div id="sessionSummary" style="font-size:0.88em;color:var(--text-dim)">-</div>
+      <button class="btn" id="clearSessionsBtn" style="padding:4px 14px;font-size:0.8em;background:var(--red)">清空全部</button>
+    </div>
     <div style="overflow-x:auto">
       <table>
         <thead>
-          <tr><th>缓存键</th><th>模型</th><th>已用时间</th><th>剩余 TTL</th></tr>
+          <tr><th>缓存键</th><th>模型</th><th>已用时间</th><th>剩余 TTL</th><th>操作</th></tr>
         </thead>
         <tbody id="sessionBody">
-          <tr><td colspan="4" class="loading">加载中...</td></tr>
+          <tr><td colspan="5" class="loading">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -385,10 +388,34 @@ footer {
     </details>
   </div>
 
-  <!-- 令牌管理 -->
+  <!-- 账号管理 -->
   <div class="card">
-    <h2>令牌管理</h2>
+    <h2>账号管理</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">支持 <strong>邮箱或手机号</strong> 登录；添加 / 删除立即生效（热加载）。删除账号会一并移除其令牌。</p>
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table>
+        <thead><tr><th>账号</th><th>令牌</th><th>视觉</th><th>错误</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="accountBody">
+          <tr><td colspan="6" class="loading">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
     <div class="forms-row">
+      <div>
+        <h3 style="font-size:0.92em;margin-bottom:8px">添加账号（邮箱 / 手机号）</h3>
+        <form id="addAccountForm">
+          <div class="form-group">
+            <label>邮箱或手机号</label>
+            <input type="text" id="addAccountEmail" placeholder="如 user@mail.com 或 13800138000" required>
+          </div>
+          <div class="form-group">
+            <label>密码</label>
+            <input type="password" id="addAccountPassword" placeholder="账号密码" required>
+          </div>
+          <button type="submit" class="btn">添加</button>
+          <div class="msg" id="addAccountMsg"></div>
+        </form>
+      </div>
       <div>
         <h3 style="font-size:0.92em;margin-bottom:8px">添加令牌</h3>
         <form id="addTokenForm">
@@ -398,21 +425,6 @@ footer {
           </div>
           <button type="submit" class="btn">添加</button>
           <div class="msg" id="addTokenMsg"></div>
-        </form>
-      </div>
-      <div>
-        <h3 style="font-size:0.92em;margin-bottom:8px">登录添加</h3>
-        <form id="loginForm">
-          <div class="form-group">
-            <label>邮箱</label>
-            <input type="email" id="loginEmail" placeholder="DeepSeek 账号邮箱" required>
-          </div>
-          <div class="form-group">
-            <label>密码</label>
-            <input type="password" id="loginPassword" placeholder="DeepSeek 账号密码" required>
-          </div>
-          <button type="submit" class="btn">登录</button>
-          <div class="msg" id="loginMsg"></div>
         </form>
       </div>
     </div>
@@ -559,7 +571,7 @@ function render(data) {
   // Token pool
   const poolBody = $('poolBody');
   if (data.pool.length === 0) {
-    poolBody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">无令牌</td></tr>';
+    poolBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无令牌</td></tr>';
   } else {
     poolBody.innerHTML = data.pool.map(t => `<tr>
       <td>${t.token}</td>
@@ -567,7 +579,10 @@ function render(data) {
       <td>${t.errorCount}</td>
       <td>${t.activeRequests} / ${t.maxConcurrent}</td>
       <td>${healthDot(t.errorCount, t.activeRequests, t.maxConcurrent)}</td>
+      <td><button class="btn" style="background:var(--red);padding:3px 12px;font-size:0.8em" data-token="${t.token.replace('...', '')}">删除</button></td>
     </tr>`).join('');
+    poolBody.querySelectorAll('button[data-token]').forEach(btn =>
+      btn.addEventListener('click', () => removeToken(btn.dataset.token)));
   }
 
   // Sessions
@@ -575,7 +590,7 @@ function render(data) {
   $('sessionSummary').textContent = sessions.count + ' 个会话已缓存 · TTL: ' + formatDuration(sessions.ttl);
   const sBody = $('sessionBody');
   if (sessions.sessions.length === 0) {
-    sBody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">无缓存会话</td></tr>';
+    sBody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">无缓存会话</td></tr>';
   } else {
     sBody.innerHTML = sessions.sessions.map(s => {
       const ttlStyle = s.ttlRemainingSeconds < 3600 ? 'color:var(--yellow)' : '';
@@ -585,8 +600,11 @@ function render(data) {
         <td>${s.modelType}</td>
         <td>${formatDuration(s.ageSeconds)}</td>
         <td style="${expiredStyle || ttlStyle}">${s.ttlRemainingSeconds === 0 ? '已过期' : formatDuration(s.ttlRemainingSeconds)}</td>
+        <td><button class="btn" style="background:var(--red);padding:3px 12px;font-size:0.8em" data-key="${s.key}">删除</button></td>
       </tr>`;
     }).join('');
+    sBody.querySelectorAll('button[data-key]').forEach(btn =>
+      btn.addEventListener('click', () => deleteSessionByKey(btn.dataset.key)));
   }
 
   $('lastRefresh').textContent = new Date().toLocaleTimeString();
@@ -610,12 +628,13 @@ function setupRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const ms = parseInt($('interval').value);
   if (ms > 0) {
-    refreshTimer = setInterval(fetchStats, ms);
+    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); }, ms);
   }
 }
 
 $('interval').addEventListener('change', setupRefresh);
-$('refreshBtn').addEventListener('click', fetchStats);
+$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); });
+$('clearSessionsBtn').addEventListener('click', clearSessions);
 
 // Panel login
 $('authSubmitBtn').addEventListener('click', async () => {
@@ -683,15 +702,16 @@ $('addTokenForm').addEventListener('submit', async e => {
   }
 });
 
-$('loginForm').addEventListener('submit', async e => {
+// ---- Account management (email or phone) ----
+$('addAccountForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const email = $('loginEmail').value.trim();
-  const password = $('loginPassword').value;
-  const msgEl = $('loginMsg');
+  const email = $('addAccountEmail').value.trim();
+  const password = $('addAccountPassword').value;
+  const msgEl = $('addAccountMsg');
   msgEl.textContent = '登录中...';
   msgEl.className = 'msg';
   try {
-    const res = await apiFetch('/admin/api/token/login', {
+    const res = await apiFetch('/admin/api/account/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -699,19 +719,117 @@ $('loginForm').addEventListener('submit', async e => {
     const data = await res.json();
     if (data.success) {
       msgEl.className = 'msg msg-ok';
-      msgEl.textContent = '登录成功！令牌: ' + data.token;
-      $('loginEmail').value = '';
-      $('loginPassword').value = '';
+      msgEl.textContent = (data.message ? data.message : '添加成功！') + ' 令牌: ' + (data.token || '-');
+      $('addAccountEmail').value = '';
+      $('addAccountPassword').value = '';
       fetchStats();
+      fetchAccounts();
     } else {
       msgEl.className = 'msg msg-err';
-      msgEl.textContent = data.error?.message || '登录失败';
+      msgEl.textContent = data.error?.message || '失败';
     }
   } catch (err) {
     msgEl.className = 'msg msg-err';
     msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
   }
 });
+
+function renderAccounts(accounts) {
+  const body = $('accountBody');
+  if (!accounts || accounts.length === 0) {
+    body.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无账号</td></tr>';
+    return;
+  }
+  body.innerHTML = accounts.map(a => {
+    const status = a.dead
+      ? '<span class="dot dot-red"></span>不可用'
+      : a.errorCount >= 1 ? '<span class="dot dot-yellow"></span>异常'
+      : '<span class="dot dot-green"></span>正常';
+    return `<tr>
+      <td>${a.email}</td>
+      <td>${a.token}</td>
+      <td>${visionLabel(a.visionCapable)}</td>
+      <td>${a.errorCount}</td>
+      <td>${status}</td>
+      <td><button class="btn" style="background:var(--red);padding:3px 12px;font-size:0.8em" data-email="${a.email}">删除</button></td>
+    </tr>`;
+  }).join('');
+  body.querySelectorAll('button[data-email]').forEach(btn =>
+    btn.addEventListener('click', () => removeAccount(btn.dataset.email)));
+}
+
+async function fetchAccounts() {
+  try {
+    const res = await apiFetch('/admin/api/accounts');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.success) renderAccounts(data.accounts);
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('fetchAccounts error:', e);
+  }
+}
+
+async function removeAccount(email) {
+  if (!confirm('确认删除账号 ' + email + '？将同时移除其令牌。')) return;
+  try {
+    const res = await apiFetch('/admin/api/account/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (data.success) { fetchStats(); fetchAccounts(); }
+    else alert(data.message || '删除失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+// ---- Token removal ----
+async function removeToken(prefix) {
+  if (!confirm('确认删除令牌 ' + prefix + '...？')) return;
+  try {
+    const res = await apiFetch('/admin/api/token/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tokenPrefix: prefix }),
+    });
+    const data = await res.json();
+    if (data.success) { fetchStats(); fetchAccounts(); }
+    else alert(data.message || '删除失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+// ---- Session cache management ----
+async function deleteSessionByKey(key) {
+  if (!confirm('删除会话 ' + key + '？')) return;
+  try {
+    const res = await apiFetch('/admin/api/session/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cacheKey: key }),
+    });
+    const data = await res.json();
+    if (data.success) fetchStats();
+    else alert(data.message || '删除失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+async function clearSessions() {
+  if (!confirm('确认清空所有会话缓存？')) return;
+  try {
+    const res = await apiFetch('/admin/api/session/clear', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) fetchStats();
+    else alert(data.message || '清空失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
 
 // ---- API Key management ----
 async function loadApiKeys() {
@@ -811,6 +929,7 @@ $('passwordForm').addEventListener('submit', async e => {
 // ---- Bootstrap ----
 function startPanel() {
   fetchStats();
+  fetchAccounts();
   setupRefresh();
   loadApiKeys();
 }

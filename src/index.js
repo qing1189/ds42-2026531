@@ -2,8 +2,8 @@ import { config } from 'dotenv';
 config();
 
 import express from 'express';
-import { initTokenPool, getPoolInfo, getTotalCapacity, addTokenToPool, loginAndAddToken, getAliveTokens, startHealthCheck } from './auth.js';
-import { prewarmSessions, getSessionInfo } from './session.js';
+import { initTokenPool, getPoolInfo, getTotalCapacity, addTokenToPool, loginAndAddToken, getAliveTokens, startHealthCheck, addAccountToPool, listAccounts, removeAccountFromPool, removeTokenFromPool } from './auth.js';
+import { prewarmSessions, getSessionInfo, deleteSession, clearAllSessions } from './session.js';
 import { handleOpenAICompletion, handleOpenAIModels } from './openai.js';
 import { handleDeepSeekCompletion } from './deepseek.js';
 import { getQueueInfo } from './queue.js';
@@ -158,6 +158,60 @@ app.post('/admin/api/token/login', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: { message: err.message } });
   }
+});
+
+// Remove a token from the pool by prefix (hot-reload)
+app.post('/admin/api/token/remove', (req, res) => {
+  const { tokenPrefix } = req.body || {};
+  if (!tokenPrefix) {
+    return res.status(400).json({ error: { message: 'tokenPrefix required' } });
+  }
+  const result = removeTokenFromPool(tokenPrefix);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+// --- Account management (email or phone, hot-reload) ---
+app.get('/admin/api/accounts', (req, res) => {
+  res.json({ success: true, accounts: listAccounts() });
+});
+
+app.post('/admin/api/account/add', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: { message: 'email/phone and password required' } });
+  }
+  try {
+    const result = await addAccountToPool(email, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+app.post('/admin/api/account/remove', (req, res) => {
+  const { email } = req.body || {};
+  if (!email) {
+    return res.status(400).json({ error: { message: 'email/phone required' } });
+  }
+  const result = removeAccountFromPool(email);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+// --- Session cache management (hot-reload) ---
+app.post('/admin/api/session/delete', (req, res) => {
+  const { cacheKey } = req.body || {};
+  if (!cacheKey) {
+    return res.status(400).json({ error: { message: 'cacheKey required' } });
+  }
+  const result = deleteSession(cacheKey);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+app.post('/admin/api/session/clear', (req, res) => {
+  res.json(clearAllSessions());
 });
 
 // Admin: API key management (hot-reload)
