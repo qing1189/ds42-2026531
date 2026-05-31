@@ -1,0 +1,41 @@
+# Dependencies (reinstalled inside the image)
+node_modules/
+
+# Version control
+.git/
+.gitignore
+
+# Environment / secrets (provide via env_file or -e at runtime)
+.env
+.env.*
+!.env.example
+
+# Runtime logs / data
+logs/
+*.log
+.pm2/
+
+# Docs & reports (not needed at runtime)
+README.md
+OPTIMIZE-REPORT.html
+
+# Tests
+test_*.mjs
+test_*.js
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+__pycache__/
+*.png
+
+# Build / deploy artifacts
+deploy.tar.gz
+42w-portal-patch/
+pow_js_worker.js
+pow_wasm_worker.js
+tmp_main.js
+tmp_js_worker.js
+tmp_wasm_worker.js
+src/admin_index.html.tmp
