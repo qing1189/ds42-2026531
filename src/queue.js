@@ -23,6 +23,13 @@ export function enqueueRequest(preferVision, timeoutMs = 30000) {
       return;
     }
 
+    // No tokens configured at all — fail fast instead of waiting for a timeout.
+    if (getTotalCapacity() === 0) {
+      clearTimeout(timer);
+      reject(new Error('No DeepSeek tokens available. Configure DS_TOKEN/DS_TOKENS/DS_ACCOUNTS, or add a token via the admin panel at /admin.'));
+      return;
+    }
+
     // ⚠️ OVERLOAD: no token available, request must queue
     const now = Date.now();
     if (now - lastOverloadLog > OVERLOAD_LOG_COOLDOWN) {

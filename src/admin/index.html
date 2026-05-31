@@ -418,19 +418,62 @@ footer {
     </div>
   </div>
 
+  <!-- API Key 管理 -->
+  <div class="card">
+    <h2>API Key 管理</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:10px">用于客户端调用 <code>/v1</code> 与 <code>/api/v0</code> 接口的密钥，可配置多个。新增 / 删除立即生效（热加载）。未配置任何 Key 时接口不鉴权。</p>
+    <div style="overflow-x:auto;margin-bottom:12px">
+      <table>
+        <thead><tr><th>API Key</th><th style="width:90px">操作</th></tr></thead>
+        <tbody id="apiKeyBody">
+          <tr><td colspan="2" class="loading">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 style="font-size:0.92em;margin-bottom:8px">添加 / 生成 Key</h3>
+    <form id="addKeyForm">
+      <div class="form-group">
+        <label>API Key（留空则自动生成）</label>
+        <input type="text" id="addKeyInput" placeholder="sk-... 或留空自动生成">
+      </div>
+      <button type="submit" class="btn">添加</button>
+      <div class="msg" id="addKeyMsg"></div>
+    </form>
+  </div>
+
+  <!-- 面板密码 -->
+  <div class="card">
+    <h2>面板密码</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:10px">用于登录本管理面板，与 API Key <strong>相互独立</strong>。设置后访问面板需输入此密码。修改将使现有登录失效。</p>
+    <form id="passwordForm">
+      <div class="forms-row">
+        <div class="form-group">
+          <label>当前密码（首次设置可留空）</label>
+          <input type="password" id="oldPwInput" placeholder="若已设置则必填">
+        </div>
+        <div class="form-group">
+          <label>新密码（至少 4 位）</label>
+          <input type="password" id="newPwInput" placeholder="输入新面板密码" required>
+        </div>
+      </div>
+      <button type="submit" class="btn">保存密码</button>
+      <div class="msg" id="passwordMsg"></div>
+    </form>
+  </div>
+
   <footer>上次刷新: <span id="lastRefresh">-</span></footer>
 </div>
 
 <!-- Auth overlay -->
 <div class="auth-overlay" id="authOverlay" style="display:none">
   <div class="auth-box">
-    <h3>需要 API Key</h3>
-    <p style="font-size:0.85em;color:var(--text-dim);margin-bottom:12px">此服务器已配置 API_KEY 验证，请输入密钥。</p>
+    <h3>面板登录</h3>
+    <p style="font-size:0.85em;color:var(--text-dim);margin-bottom:12px">此面板已设置独立的面板密码，请输入以继续。</p>
     <div class="form-group">
-      <label>API Key</label>
-      <input type="password" id="authKeyInput" placeholder="输入 API Key...">
+      <label>面板密码</label>
+      <input type="password" id="authKeyInput" placeholder="输入面板密码...">
     </div>
-    <button class="btn" id="authSubmitBtn">确认</button>
+    <button class="btn" id="authSubmitBtn">登录</button>
     <div class="msg" id="authMsg"></div>
   </div>
 </div>
@@ -438,22 +481,26 @@ footer {
 <script>
 const $ = id => document.getElementById(id);
 let refreshTimer = null;
+let panelRequired = false;
 
-function getApiKey() {
-  return sessionStorage.getItem('adminApiKey') || '';
+function getPanelToken() {
+  return sessionStorage.getItem('panelToken') || '';
 }
 
 function authHeaders() {
-  const key = getApiKey();
-  return key ? { 'Authorization': 'Bearer ' + key } : {};
+  const t = getPanelToken();
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
+
+function showLogin() { $('authOverlay').style.display = 'flex'; }
+function hideLogin() { $('authOverlay').style.display = 'none'; }
 
 async function apiFetch(url, options = {}) {
   const headers = { ...authHeaders(), ...(options.headers || {}) };
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) {
-    sessionStorage.removeItem('adminApiKey');
-    $('authOverlay').style.display = 'flex';
+    sessionStorage.removeItem('panelToken');
+    showLogin();
     throw new Error('unauthorized');
   }
   return res;
@@ -570,18 +617,37 @@ function setupRefresh() {
 $('interval').addEventListener('change', setupRefresh);
 $('refreshBtn').addEventListener('click', fetchStats);
 
-// Auth overlay
-$('authSubmitBtn').addEventListener('click', () => {
-  const key = $('authKeyInput').value.trim();
-  if (!key) {
+// Panel login
+$('authSubmitBtn').addEventListener('click', async () => {
+  const pw = $('authKeyInput').value;
+  if (!pw) {
     $('authMsg').className = 'msg msg-err';
-    $('authMsg').textContent = '请输入 API Key';
+    $('authMsg').textContent = '请输入面板密码';
     return;
   }
-  sessionStorage.setItem('adminApiKey', key);
-  $('authOverlay').style.display = 'none';
-  $('authMsg').textContent = '';
-  fetchStats();
+  $('authMsg').className = 'msg';
+  $('authMsg').textContent = '登录中...';
+  try {
+    const res = await fetch('/admin/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (data.token) sessionStorage.setItem('panelToken', data.token);
+      $('authKeyInput').value = '';
+      $('authMsg').textContent = '';
+      hideLogin();
+      startPanel();
+    } else {
+      $('authMsg').className = 'msg msg-err';
+      $('authMsg').textContent = data.error?.message || '密码错误';
+    }
+  } catch {
+    $('authMsg').className = 'msg msg-err';
+    $('authMsg').textContent = '登录请求失败';
+  }
 });
 
 $('authKeyInput').addEventListener('keydown', e => {
@@ -647,9 +713,123 @@ $('loginForm').addEventListener('submit', async e => {
   }
 });
 
-// Init
-fetchStats();
-setupRefresh();
+// ---- API Key management ----
+async function loadApiKeys() {
+  try {
+    const res = await apiFetch('/admin/api/apikeys');
+    const data = await res.json();
+    const body = $('apiKeyBody');
+    if (!data.keys || data.keys.length === 0) {
+      body.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim)">未配置 API Key（接口当前不鉴权）</td></tr>';
+      return;
+    }
+    body.innerHTML = data.keys.map(k => `<tr>
+      <td>${k.masked}</td>
+      <td><button class="btn btn-del" style="background:var(--red);padding:3px 12px" data-id="${k.id}">删除</button></td>
+    </tr>`).join('');
+    body.querySelectorAll('button[data-id]').forEach(btn =>
+      btn.addEventListener('click', () => removeApiKey(btn.dataset.id)));
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('loadApiKeys error:', e);
+  }
+}
+
+async function removeApiKey(id) {
+  if (!confirm('确定删除此 API Key？删除后使用该 Key 的客户端将立即失效。')) return;
+  try {
+    const res = await apiFetch('/admin/api/apikeys/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (res.ok) loadApiKeys();
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('removeApiKey error:', e);
+  }
+}
+
+$('addKeyForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const key = $('addKeyInput').value.trim();
+  const msgEl = $('addKeyMsg');
+  msgEl.className = 'msg';
+  msgEl.textContent = '处理中...';
+  try {
+    const res = await apiFetch('/admin/api/apikeys/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = data.generated ? ('已生成新 Key：' + data.key + '（请立即复制保存）') : '添加成功';
+      $('addKeyInput').value = '';
+      loadApiKeys();
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = data.error?.message || '添加失败';
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
+  }
+});
+
+// ---- Panel password ----
+$('passwordForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const oldPassword = $('oldPwInput').value;
+  const newPassword = $('newPwInput').value;
+  const msgEl = $('passwordMsg');
+  msgEl.className = 'msg';
+  msgEl.textContent = '保存中...';
+  try {
+    const res = await apiFetch('/admin/api/password/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = '面板密码已更新';
+      if (data.token) sessionStorage.setItem('panelToken', data.token);
+      panelRequired = true;
+      $('oldPwInput').value = '';
+      $('newPwInput').value = '';
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = data.error?.message || '保存失败';
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
+  }
+});
+
+// ---- Bootstrap ----
+function startPanel() {
+  fetchStats();
+  setupRefresh();
+  loadApiKeys();
+}
+
+async function boot() {
+  try {
+    const cfg = await fetch('/admin/api/config').then(r => r.json());
+    panelRequired = !!cfg.panelAuthRequired;
+  } catch {
+    panelRequired = false;
+  }
+  if (panelRequired && !getPanelToken()) {
+    showLogin();
+    return;
+  }
+  startPanel();
+}
+
+boot();
 </script>
 </body>
 </html>

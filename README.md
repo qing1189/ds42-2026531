@@ -26,7 +26,7 @@
                 客户端 (OpenAI SDK / Claude Code / 网关)
                               │
                      index.js (Express 入口)
-                  日志中间件 + API_KEY 鉴权中间件
+              日志中间件 · API Key 鉴权 · 面板密码鉴权
         ┌─────────────────────┼─────────────────────────┐
         ▼                     ▼                          ▼
  /v1/chat/completions  /api/v0/chat/completion     /admin · /performance
@@ -101,11 +101,11 @@ curl http://localhost:3000/v1/chat/completions \
 
 | 方法 / 路径 | 说明 |
 |------|------|
-| `GET /v1/models` | 列出可用模型 |
-| `POST /api/v0/chat/completion` | DeepSeek 原生格式（透传 SSE） |
-| `GET /` | 健康检查 + 池 / 队列状态（启用 `API_KEY` 时需鉴权） |
-| `GET /admin` | 管理面板（无需鉴权，便于浏览器访问） |
-| `GET /performance` | 性能监控面板 |
+| `GET /v1/models` | 列出可用模型（API Key 鉴权） |
+| `POST /api/v0/chat/completion` | DeepSeek 原生格式（透传 SSE，API Key 鉴权） |
+| `GET /` | 健康检查 + 池 / 队列状态（公开，无需鉴权，供容器健康检查使用） |
+| `GET /admin` | 管理面板（页面公开；设置面板密码后操作类接口需登录） |
+| `GET /performance` | 性能监控面板（同上） |
 
 ---
 
@@ -115,17 +115,39 @@ curl http://localhost:3000/v1/chat/completions \
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `DS_TOKEN` | 二选一 | 单个 DeepSeek token |
-| `DS_TOKENS` | 二选一 | 多个 token，英文逗号分隔：`token1,token2` |
+| `DS_TOKEN` | 可选 | 单个 DeepSeek token |
+| `DS_TOKENS` | 可选 | 多个 token，英文逗号分隔：`token1,token2` |
 | `DS_ACCOUNTS` | 可选 | 账号自动登录：`email1:pass1,email2:pass2` |
 | `DS_ACCOUNTS_EXTENDED` | 可选 | 将已有 token 关联到账号：`email:password:token前12位` |
 | `PORT` | 否（默认 3000） | 服务监听端口 |
-| `API_KEY` | 否 | 本服务的 Bearer 鉴权 key，留空则不鉴权 |
+| `API_KEYS` | 否 | 客户端调用 `/v1`、`/api/v0` 的密钥，**支持多个**，英文逗号分隔；留空则不鉴权 |
+| `API_KEY` | 否 | 兼容旧的单值写法，会与 `API_KEYS` 合并 |
+| `PANEL_PASSWORD` | 否 | **管理面板独立密码**（与 API Key 相互独立）；留空则面板无需登录 |
 | `LOG_DIR` | 否 | 日志目录；**Docker 部署务必设为 `/app/logs`**（已在 compose / Dockerfile 中默认设置） |
 | `MERGE_THINKING` | 否 | `true` 时全局将思考合并进 `content` |
 | `HTTPS_PROXY` / `HTTP_PROXY` | 否 | 出口代理地址 |
 
-> ⚠️ `DS_TOKEN` / `DS_TOKENS` 与 `DS_ACCOUNTS` 至少配置一项，否则服务启动会报错。
+> ✅ **所有 DeepSeek 认证项都可以留空**：服务会以空令牌池启动，之后可在管理面板 `/admin` 添加 token / 账号登录，**立即生效（热加载）**，无需重启。
+>
+> 在未配置任何令牌时调用聊天接口会立即返回明确错误，提示前往 `/admin` 添加令牌。
+
+---
+
+## 认证与访问控制
+
+本服务有 **两套相互独立** 的鉴权，互不共用密钥：
+
+| 鉴权 | 作用范围 | 配置项 | Web 管理 |
+|------|----------|--------|----------|
+| **API Key** | 客户端调用 `/v1/*`、`/api/v0/*` | `API_KEYS`（多个）/ `API_KEY` | `/admin` →「API Key 管理」可增删、可自动生成 |
+| **面板密码** | 登录管理面板与监控页 | `PANEL_PASSWORD` | `/admin` → 「面板密码」可设置 / 修改 |
+
+特性：
+
+- **多 API Key**：可配置任意数量，逐个独立校验；在面板中新增、删除或自动生成，**立即生效（热加载）**。未配置任何 Key 时 `/v1`、`/api/v0` 不鉴权。
+- **独立面板密码**：与 API Key 完全分离。设置后访问面板需登录（会话有效期 24h）；修改密码需提供当前密码并使现有登录失效。留空则面板无需登录（便于首次进入设置密码）。
+- **DeepSeek 令牌热加载**：在面板「令牌管理」中粘贴 token 或用账号登录，立即加入令牌池。
+- **持久化**：通过面板添加的 token / API Key / 面板密码会回写到 `.env`，重启后仍生效（前提是 `.env` 可写，见下方 Docker 持久化说明）。
 
 ---
 
@@ -217,18 +239,31 @@ npm start              # 或 npm run dev（--watch 热重载）
 ## 管理与监控
 
 - **管理面板**：`http://localhost:3000/admin`
-  - 查看池 / 队列 / 会话 / 日志统计，在线添加 token、账号登录、查看历史对话。
+  - 查看池 / 队列 / 会话 / 日志统计，查看历史对话。
+  - 在线添加 DeepSeek token、账号登录（热加载）。
+  - **API Key 管理**：增删 / 自动生成客户端密钥（热加载）。
+  - **面板密码**：设置 / 修改面板登录密码（与 API Key 独立）。
 - **性能监控**：`http://localhost:3000/performance`
   - RPM、TTFB（P50/P90）、token 速度、会话命中率与时序图。
+  - 设置面板密码后，两个页面均需用面板密码登录。
 
 ---
 
 ## 说明与注意事项
 
 - **日志路径**：代码默认日志目录为硬编码的 `/srv/threadripper-backups/newapi/logs`，Docker 部署已通过 `LOG_DIR=/app/logs` 覆盖并挂载到宿主机 `./logs`。
-- **Token 持久化**：自动登录 / 新增 token 时，服务会尝试把存活 token 回写到 `.env`。容器内若未挂载可写的 `.env`，回写会被跳过（仅打印告警，不影响运行），重启后以 `env_file` / 环境变量中的配置为准。
-- **健康检查**：容器健康检查请求 `GET /`，只要进程能响应 HTTP（即使因 `API_KEY` 返回 401）即视为存活。
-- **安全建议**：生产环境务必设置 `API_KEY`，并通过反向代理（Nginx / Caddy）启用 HTTPS；不要把真实 `.env` 提交到仓库（已在 `.gitignore` / `.dockerignore` 中排除）。
+- **配置持久化（重要）**：通过面板添加的 token / API Key / 面板密码会回写到 `.env`。容器内若未挂载可写的 `.env`，回写会被跳过（仅告警，不影响运行时热加载），但**重启后这些改动会丢失**，以 `env_file` / 环境变量为准。若希望面板内的改动在重启后保留，请挂载 `.env`：
+
+  ```yaml
+  # docker-compose.yml 的 volumes 中追加：
+  volumes:
+    - ./logs:/app/logs
+    - ./.env:/app/.env      # 让面板新增的 token / API Key / 面板密码持久化
+  ```
+
+  （docker run 则追加 `-v "$(pwd)/.env:/app/.env"`。挂载前请确保宿主机 `.env` 已存在且可写。）
+- **健康检查**：容器健康检查请求 `GET /`，该端点公开返回服务状态，进程能响应即视为存活。
+- **安全建议**：生产环境建议同时设置 `API_KEYS`（保护接口）与 `PANEL_PASSWORD`（保护面板），并通过反向代理（Nginx / Caddy）启用 HTTPS；不要把真实 `.env` 提交到仓库（已在 `.gitignore` / `.dockerignore` 中排除）。
 - **合规**：本项目用于个人学习与研究，请遵守 DeepSeek 的服务条款，自行承担使用风险。
 
 ---
@@ -245,6 +280,8 @@ npm start              # 或 npm run dev（--watch 热重载）
 └── src/
     ├── index.js            # 入口
     ├── auth.js             # Token / 账号池
+    ├── access.js           # API Key 集合 + 面板密码 / 会话
+    ├── env_store.js        # .env 读改写助手（持久化）
     ├── chat.js             # 聊天流程
     ├── openai.js           # OpenAI 格式
     ├── deepseek.js         # DeepSeek 原生格式

@@ -117,9 +117,38 @@
   </div>
 </div>
 
+<div id="pAuthOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;width:340px;">
+    <h3 style="color:var(--accent);margin-bottom:12px;font-size:16px;">面板登录</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">此面板已设置面板密码，请输入以查看监控数据。</p>
+    <input type="password" id="pAuthInput" placeholder="输入面板密码..." style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:12px;">
+    <button id="pAuthBtn" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:14px;cursor:pointer;">登录</button>
+    <div id="pAuthMsg" style="font-size:13px;color:var(--red);margin-top:8px;min-height:1.2em;"></div>
+  </div>
+</div>
+
 <script>
 const base = '';
 let currentRange = '6h';
+let panelRequired = false;
+let booted = false;
+
+function getPanelToken() { return sessionStorage.getItem('panelToken') || ''; }
+function pAuthHeaders() {
+  const t = getPanelToken();
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+function showLogin() { document.getElementById('pAuthOverlay').style.display = 'flex'; }
+function hideLogin() { document.getElementById('pAuthOverlay').style.display = 'none'; }
+async function pfetch(url) {
+  const res = await fetch(url, { headers: pAuthHeaders() });
+  if (res.status === 401) {
+    sessionStorage.removeItem('panelToken');
+    showLogin();
+    throw new Error('unauthorized');
+  }
+  return res.json();
+}
 
 // --- Charts setup ---
 const chartOpts = (yLabel) => ({
@@ -145,9 +174,9 @@ const chMisc = new Chart(document.getElementById('chartMisc'), { type: 'line', d
 async function refreshMetrics() {
   try {
     const [m, q, p] = await Promise.all([
-      fetch(base + '/performance/api/metrics').then(r => r.json()),
-      fetch(base + '/admin/api/stats').then(r => r.json()),
-      fetch(base + '/performance/api/timeseries?range=' + currentRange).then(r => r.json()),
+      pfetch(base + '/performance/api/metrics'),
+      pfetch(base + '/admin/api/stats'),
+      pfetch(base + '/performance/api/timeseries?range=' + currentRange),
     ]);
 
     // Cards
@@ -193,7 +222,7 @@ async function refreshMetrics() {
     chMisc.options.scales.x.ticks.callback = timeFmt;
     chMisc.update();
   } catch (e) {
-    console.error('Metrics fetch failed:', e);
+    if (e.message !== 'unauthorized') console.error('Metrics fetch failed:', e);
   }
 }
 
@@ -206,9 +235,55 @@ document.getElementById('rangeSelector').addEventListener('click', e => {
   refreshMetrics();
 });
 
-// Auto refresh
-refreshMetrics();
-setInterval(refreshMetrics, 15000);
+// Panel login
+document.getElementById('pAuthBtn').addEventListener('click', login);
+document.getElementById('pAuthInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+async function login() {
+  const pw = document.getElementById('pAuthInput').value;
+  const msg = document.getElementById('pAuthMsg');
+  if (!pw) { msg.textContent = '请输入面板密码'; return; }
+  msg.textContent = '登录中...';
+  try {
+    const res = await fetch('/admin/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (data.token) sessionStorage.setItem('panelToken', data.token);
+      document.getElementById('pAuthInput').value = '';
+      msg.textContent = '';
+      hideLogin();
+      startMonitor();
+    } else {
+      msg.textContent = data.error?.message || '密码错误';
+    }
+  } catch {
+    msg.textContent = '登录请求失败';
+  }
+}
+
+// Auto refresh (after auth)
+function startMonitor() {
+  if (booted) return;
+  booted = true;
+  refreshMetrics();
+  setInterval(refreshMetrics, 15000);
+}
+
+async function boot() {
+  try {
+    const cfg = await fetch('/admin/api/config').then(r => r.json());
+    panelRequired = !!cfg.panelAuthRequired;
+  } catch {
+    panelRequired = false;
+  }
+  if (panelRequired && !getPanelToken()) { showLogin(); return; }
+  startMonitor();
+}
+
+boot();
 </script>
 </body>
 </html>
