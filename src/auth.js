@@ -99,6 +99,7 @@ for (const acct of accounts) {
 
 import { loginHeaders, getHeaders, getDeviceId, proxiedFetch, getDeviceIdForToken } from './headers.js';
 import { loginProxiedFetch } from './proxy.js';
+import { selectToken, recordDispatch, recordSuccess, recordFailure } from './scheduler.js';
 
 async function login(account, password) {
   // Use a fresh deviceId for login — real browser gets it from portal101.cn device fingerprint
@@ -283,10 +284,24 @@ export function acquireToken(preferVision = false) {
     }
   }
 
-  candidates.sort((a, b) => a.activeRequests - b.activeRequests);
-  const chosen = candidates[0];
+  // --- Smart Scheduler: weighted random selection ---
+  const candidateTokens = candidates.map(t => t.token);
+  const selection = selectToken(candidateTokens);
+
+  let chosen;
+  if (selection) {
+    chosen = candidates.find(t => t.token === selection.token);
+  }
+
+  // Fallback: if scheduler returns nothing (all cooling/rate-limited), pick least-loaded
+  if (!chosen) {
+    candidates.sort((a, b) => a.activeRequests - b.activeRequests);
+    chosen = candidates[0];
+  }
+
   chosen.activeRequests++;
   chosen.lastUsed = Date.now();
+  recordDispatch(chosen.token);
 
   let released = false;
   const release = () => {
@@ -295,13 +310,16 @@ export function acquireToken(preferVision = false) {
     chosen.activeRequests = Math.max(0, chosen.activeRequests - 1);
   };
 
-  return { token: chosen.token, account: chosen, release };
+  return { token: chosen.token, account: chosen, release, waitMs: selection?.waitMs || 0 };
 }
 
 export function reportTokenError(token) {
   const entry = tokenPool.find(t => t.token === token);
   if (!entry) return;
   entry.errorCount++;
+
+  // Report to smart scheduler
+  recordFailure(token);
 
   if (entry.errorCount >= TOKEN_DEAD_THRESHOLD) {
     entry.dead = true;
@@ -323,6 +341,10 @@ export function reportTokenSuccess(token) {
   if (!entry) return;
   entry.errorCount = 0;
   entry.lastUsed = Date.now();
+
+  // Report to smart scheduler
+  recordSuccess(token);
+
   if (entry.dead) {
     entry.dead = false;
     console.log(`Token ${token.slice(0, 12)}... revived (was dead, now working)`);
