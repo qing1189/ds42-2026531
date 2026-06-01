@@ -1,6 +1,7 @@
 import { reportTokenError, reportTokenSuccess, setRequestToken, getRequestToken } from './auth.js';
 import { apiHeaders, proxiedFetch } from './headers.js';
 import { recordSessionHit } from './metrics.js';
+import { getConfigValue, setConfigValue } from './persist.js';
 
 const BASE_URL = 'https://chat.deepseek.com';
 const SESSION_TTL = 259200; // 3 days in seconds
@@ -11,10 +12,18 @@ const sessionPool = new Map(); // key: token:model_type, value: { id, model_type
 // 'none'   — keep sessions (default)
 // 'single' — delete the current session on DeepSeek after each chat completion
 // 'all'    — delete ALL sessions on DeepSeek after each chat completion
-let autoDeleteMode = (process.env.AUTO_DELETE || 'none').toLowerCase().trim();
-if (!['none', 'single', 'all'].includes(autoDeleteMode)) {
-  console.warn(`Invalid AUTO_DELETE value "${autoDeleteMode}", falling back to "none"`);
-  autoDeleteMode = 'none';
+// 优先从 JSON 持久化加载
+const persistedAutoDelete = getConfigValue('autoDeleteMode');
+let autoDeleteMode;
+if (persistedAutoDelete && ['none', 'single', 'all'].includes(persistedAutoDelete)) {
+  autoDeleteMode = persistedAutoDelete;
+  console.log(`[Persist] Restored autoDeleteMode from JSON: ${autoDeleteMode}`);
+} else {
+  autoDeleteMode = (process.env.AUTO_DELETE || 'none').toLowerCase().trim();
+  if (!['none', 'single', 'all'].includes(autoDeleteMode)) {
+    console.warn(`Invalid AUTO_DELETE value "${autoDeleteMode}", falling back to "none"`);
+    autoDeleteMode = 'none';
+  }
 }
 
 export function getAutoDeleteMode() {
@@ -27,6 +36,8 @@ export function setAutoDeleteMode(mode) {
     return { success: false, message: `无效的模式 "${mode}"，可选值: none, single, all` };
   }
   autoDeleteMode = mode;
+  // 持久化到 JSON
+  setConfigValue('autoDeleteMode', mode);
   return { success: true, message: `自动删除模式已设置为: ${mode}` };
 }
 

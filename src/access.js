@@ -5,6 +5,7 @@
 import { config } from 'dotenv';
 import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { updateEnvVars } from './env_store.js';
+import { getConfigValue, setConfigValue } from './persist.js';
 
 config();
 
@@ -15,11 +16,19 @@ function parseList(str) {
 
 // ----------------------------------------------------------------------------
 // API keys (multiple, hot-reloadable)
-//   Sources: API_KEYS=key1,key2  (preferred)  and/or  API_KEY=key  (legacy single)
+//   Sources: JSON persist > API_KEYS=key1,key2 (preferred) and/or API_KEY=key (legacy single)
 // ----------------------------------------------------------------------------
 const apiKeys = new Set();
-for (const k of parseList(process.env.API_KEYS)) apiKeys.add(k);
-if (process.env.API_KEY?.trim()) apiKeys.add(process.env.API_KEY.trim());
+
+// 优先从 JSON 持久化文件加载
+const persistedKeys = getConfigValue('apiKeys');
+if (Array.isArray(persistedKeys) && persistedKeys.length > 0) {
+  for (const k of persistedKeys) if (k) apiKeys.add(k);
+} else {
+  // 兜底：从环境变量加载
+  for (const k of parseList(process.env.API_KEYS)) apiKeys.add(k);
+  if (process.env.API_KEY?.trim()) apiKeys.add(process.env.API_KEY.trim());
+}
 
 function keyId(key) {
   return createHash('sha256').update(key).digest('hex').slice(0, 12);
@@ -32,6 +41,8 @@ function maskKey(key) {
 
 function persistApiKeys() {
   updateEnvVars({ API_KEYS: [...apiKeys].join(',') });
+  // 同步持久化到 JSON
+  setConfigValue('apiKeys', [...apiKeys]);
 }
 
 export function hasApiKeys() {

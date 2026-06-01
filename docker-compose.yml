@@ -15,6 +15,8 @@ services:
     environment:
       # Override the hardcoded default log path so logs land in the mounted volume.
       LOG_DIR: /app/logs
+      # JSON config persistence directory (mounted volume).
+      DATA_DIR: /app/data
       PORT: 3000
 
     ports:
@@ -23,6 +25,8 @@ services:
     volumes:
       # Persist request/chat logs on the host.
       - ./logs:/app/logs
+      # Persist all configuration (tokens, accounts, API keys, proxy, scheduler, etc.) as JSON.
+      - ./data:/app/data
 
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]

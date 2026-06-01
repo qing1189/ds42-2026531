@@ -39,3 +39,7 @@ tmp_main.js
 tmp_js_worker.js
 tmp_wasm_worker.js
 src/admin_index.html.tmp
+
+
+# Persisted data (JSON config — provided via volume mount at runtime)
+data/

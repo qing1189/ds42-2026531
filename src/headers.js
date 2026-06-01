@@ -1,4 +1,6 @@
 // Mimic real Chrome 120 browser session
+import { getConfigValue, setConfigValue } from './persist.js';
+
 const UA_VERSION = '120.0.0.0';
 const UA_MAJOR = '120';
 
@@ -28,6 +30,18 @@ const FINGERPRINT_CONFIG = {
   // Or rotate after this duration (ms) — 30 minutes
   ROTATE_AFTER_MS: 30 * 60 * 1000,
 };
+
+// 从 JSON 持久化加载指纹配置
+const persistedFingerprint = getConfigValue('fingerprint');
+if (persistedFingerprint && typeof persistedFingerprint === 'object') {
+  if (typeof persistedFingerprint.ROTATE_AFTER_REQUESTS === 'number' && persistedFingerprint.ROTATE_AFTER_REQUESTS > 0) {
+    FINGERPRINT_CONFIG.ROTATE_AFTER_REQUESTS = persistedFingerprint.ROTATE_AFTER_REQUESTS;
+  }
+  if (typeof persistedFingerprint.ROTATE_AFTER_MS === 'number' && persistedFingerprint.ROTATE_AFTER_MS > 0) {
+    FINGERPRINT_CONFIG.ROTATE_AFTER_MS = persistedFingerprint.ROTATE_AFTER_MS;
+  }
+  console.log('[Persist] Restored fingerprint config from JSON');
+}
 
 function randomHex(len) {
   const chars = '0123456789abcdef';
@@ -111,6 +125,8 @@ export function setFingerprintConfig(updates) {
   if (typeof updates.ROTATE_AFTER_MS === 'number' && updates.ROTATE_AFTER_MS > 0) {
     FINGERPRINT_CONFIG.ROTATE_AFTER_MS = updates.ROTATE_AFTER_MS;
   }
+  // 持久化到 JSON
+  setConfigValue('fingerprint', { ...FINGERPRINT_CONFIG });
   return { ...FINGERPRINT_CONFIG };
 }
 

@@ -26,7 +26,8 @@ RUN apk add --no-cache tini
 
 ENV NODE_ENV=production \
     PORT=3000 \
-    LOG_DIR=/app/logs
+    LOG_DIR=/app/logs \
+    DATA_DIR=/app/data
 
 WORKDIR /app
 
@@ -40,6 +41,9 @@ COPY sha3_wasm_bg.wasm ./sha3_wasm_bg.wasm
 
 # Logs directory (override the hardcoded default via LOG_DIR; mount as a volume to persist).
 RUN mkdir -p /app/logs
+
+# Data directory for JSON config persistence (mount as a volume to persist).
+RUN mkdir -p /app/data
 
 EXPOSE 3000
 

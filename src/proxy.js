@@ -14,6 +14,7 @@
  */
 
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
+import { getConfigValue, setConfigValue } from './persist.js';
 
 // 登录代理配置（内存存储，热加载）
 const proxyConfig = {
@@ -47,12 +48,22 @@ export function setManualProxy(url) {
   let cleaned = (url || '').trim();
   cleaned = cleaned.replace(/^https?:\/\//, '');
   proxyConfig.manualProxy = cleaned;
+  persistProxyConfig();
   console.log(`[LoginProxy] Manual proxy set: ${proxyConfig.manualProxy || '(cleared)'}`);
 }
 
 export function setXiequApiUrl(url) {
   proxyConfig.xiequApiUrl = (url || '').trim();
+  persistProxyConfig();
   console.log(`[LoginProxy] Xiequ API URL set: ${proxyConfig.xiequApiUrl || '(cleared)'}`);
+}
+
+// 持久化代理配置到 JSON
+function persistProxyConfig() {
+  setConfigValue('proxy', {
+    manualProxy: proxyConfig.manualProxy,
+    xiequApiUrl: proxyConfig.xiequApiUrl,
+  });
 }
 
 // ==================== 携趣 API 提取 ====================
@@ -214,6 +225,21 @@ export async function loginProxiedFetch(url, options = {}) {
 // ─── Persistence support ───
 
 export function restoreProxyConfig(config) {
+  // 优先从 JSON 持久化文件加载
+  const persisted = getConfigValue('proxy');
+  if (persisted && typeof persisted === 'object') {
+    if (persisted.manualProxy) {
+      proxyConfig.manualProxy = persisted.manualProxy;
+      console.log(`[Persist] Restored manual proxy from JSON: ${proxyConfig.manualProxy}`);
+    }
+    if (persisted.xiequApiUrl) {
+      proxyConfig.xiequApiUrl = persisted.xiequApiUrl;
+      console.log(`[Persist] Restored xiequ API URL from JSON: ${proxyConfig.xiequApiUrl}`);
+    }
+    return;
+  }
+
+  // 兜底：从传入的 config 参数恢复
   if (!config || typeof config !== 'object') return;
   if (config.manualProxy) {
     proxyConfig.manualProxy = config.manualProxy;

@@ -38,9 +38,11 @@
  *   - 全局降速持续 120s，期间无新失败则自动解除
  */
 
+import { getConfigValue, setConfigValue } from './persist.js';
+
 // ==================== 配置 ====================
 
-const CONFIG = {
+const DEFAULT_CONFIG = {
   // 权重参数
   INITIAL_WEIGHT: 30,
   MAX_WEIGHT: 50,
@@ -88,6 +90,18 @@ const CONFIG = {
   GLOBAL_RATE_MULTIPLIER: 0.5,  // 全局降速时频率系数
   GLOBAL_INTERVAL_MULTIPLIER: 3, // 全局降速时间隔倍数
 };
+
+// 从 JSON 持久化加载配置覆盖
+const persistedScheduler = getConfigValue('scheduler');
+const CONFIG = { ...DEFAULT_CONFIG };
+if (persistedScheduler && typeof persistedScheduler === 'object') {
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    if (key in persistedScheduler && typeof persistedScheduler[key] === 'number') {
+      CONFIG[key] = persistedScheduler[key];
+    }
+  }
+  console.log('[Persist] Restored scheduler config from JSON');
+}
 
 // ==================== 失败类型枚举 ====================
 
@@ -509,6 +523,8 @@ export function updateSchedulerConfig(updates) {
   }
   if (changed > 0) {
     console.log(`[Scheduler] Config updated (${changed} params)`);
+    // 持久化到 JSON
+    setConfigValue('scheduler', { ...CONFIG });
   }
   return { success: true, config: { ...CONFIG }, changed };
 }

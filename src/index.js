@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 config();
 
 import express from 'express';
+import { loadConfig, getConfigPath } from './persist.js';
 import { initTokenPool, getPoolInfo, getTotalCapacity, addTokenToPool, loginAndAddToken, getAliveTokens, startHealthCheck, addAccountToPool, listAccounts, removeAccountFromPool, removeTokenFromPool } from './auth.js';
 import { prewarmSessions, getSessionInfo, deleteSession, clearAllSessions, getAutoDeleteMode, setAutoDeleteMode } from './session.js';
 import { handleOpenAICompletion, handleOpenAIModels } from './openai.js';
@@ -447,6 +448,18 @@ app.listen(PORT, async () => {
   console.log(`DeepSeek format: POST /api/v0/chat/completion`);
   console.log(`Models: GET /v1/models`);
   console.log(`Admin panel: http://localhost:${PORT}/admin`);
+  console.log(`Data persist: ${getConfigPath()}`);
+
+  // 加载持久化配置（触发各模块从 JSON 读取）
+  const persistedConfig = loadConfig();
+  if (Object.keys(persistedConfig).length > 0) {
+    console.log(`[Persist] Loaded config keys: ${Object.keys(persistedConfig).join(', ')}`);
+  } else {
+    console.log(`[Persist] No persisted config found, using env/defaults`);
+  }
+
+  // 恢复代理配置
+  restoreProxyConfig();
 
   await initTokenPool();
 

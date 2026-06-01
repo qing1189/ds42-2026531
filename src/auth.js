@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import { updateEnvVars } from './env_store.js';
+import { getConfigValue, setConfigValue } from './persist.js';
 
 config();
 
@@ -8,10 +9,16 @@ const BASE_URL = 'https://chat.deepseek.com';
 const MAX_CONCURRENT_PER_TOKEN = 2;
 const TOKEN_DEAD_THRESHOLD = 5;
 
-// Multi-token support: DS_TOKENS=token1,token2,token3 (comma-separated)
+// Multi-token support: JSON persist > DS_TOKENS=token1,token2,token3 (comma-separated)
 // Fallback: DS_TOKEN=single_token
-// Account support: DS_ACCOUNTS=email1:pass1,email2:pass2 (auto-login to refresh tokens)
+// Account support: JSON persist > DS_ACCOUNTS=email1:pass1,email2:pass2 (auto-login to refresh tokens)
 export function loadTokens() {
+  // 优先从 JSON 持久化文件加载
+  const persisted = getConfigValue('tokens');
+  if (Array.isArray(persisted) && persisted.length > 0) {
+    return persisted.filter(Boolean);
+  }
+  // 兜底：从环境变量加载
   const tokensStr = process.env.DS_TOKENS?.trim();
   if (tokensStr) {
     return tokensStr.split(',').map(t => t.trim()).filter(Boolean);
@@ -22,6 +29,12 @@ export function loadTokens() {
 }
 
 export function loadAccounts() {
+  // 优先从 JSON 持久化文件加载
+  const persisted = getConfigValue('accounts');
+  if (Array.isArray(persisted) && persisted.length > 0) {
+    return persisted.filter(a => a && a.email && a.password);
+  }
+  // 兜底：从环境变量加载
   const accountsStr = process.env.DS_ACCOUNTS?.trim();
   if (!accountsStr) return [];
   return accountsStr.split(',').map(entry => {
@@ -422,6 +435,15 @@ function persistTokensToEnv({ allowEmpty = false } = {}) {
   // transiently invalid at startup). Explicit removals pass allowEmpty=true.
   if (aliveTokens.length === 0 && !allowEmpty) return;
   updateEnvVars({ DS_TOKENS: aliveTokens.join(',') });
+
+  // 同步持久化到 JSON
+  setConfigValue('tokens', aliveTokens);
+
+  // 同步持久化账号信息到 JSON（包含密码，方便移植）
+  const accountEntries = tokenPool
+    .filter(t => t.email && t.password)
+    .map(t => ({ email: t.email, password: t.password }));
+  setConfigValue('accounts', accountEntries);
 }
 
 export async function addTokenToPool(tokenStr) {
