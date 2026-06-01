@@ -405,7 +405,7 @@ footer {
     <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">支持 <strong>邮箱或手机号</strong> 登录；添加 / 删除立即生效（热加载）。删除账号会一并移除其令牌。</p>
     <div style="overflow-x:auto;margin-bottom:16px">
       <table>
-        <thead><tr><th>账号</th><th>令牌</th><th>权重</th><th>调度状态</th><th>频率</th><th>成功/失败</th><th>操作</th></tr></thead>
+        <thead><tr><th>账号</th><th>权重</th><th>状态</th><th>频率</th><th>成功/失败</th><th>调度次</th><th>操作</th></tr></thead>
         <tbody id="accountBody">
           <tr><td colspan="7" class="loading">加载中...</td></tr>
         </tbody>
@@ -899,58 +899,52 @@ function renderAccounts(accounts) {
     return;
   }
   body.innerHTML = accounts.map(a => {
-    const sch = a.scheduler;
+    const sch = a.scheduler || {};
+    const weight = sch.weight ?? 0;
+    const maxWeight = sch.maxWeight ?? 50;
+    const pct = Math.round((weight / maxWeight) * 100);
+    const barColor = sch.status === 'cooling' ? 'var(--red)' : sch.status === 'probation' ? 'var(--yellow)' : weight < 10 ? 'var(--yellow)' : 'var(--green)';
+
     // Weight bar
-    let weightHtml = '<span style="color:var(--text-dim)">-</span>';
-    let statusHtml = '';
-    let freqHtml = '-';
-    let successFailHtml = '-';
-    if (sch) {
-      const pct = Math.round((sch.weight / sch.maxWeight) * 100);
-      const barColor = sch.status === 'cooling' ? 'var(--red)' : sch.status === 'probation' ? 'var(--yellow)' : sch.weight < 10 ? 'var(--yellow)' : 'var(--green)';
-      weightHtml = `<div style="display:flex;align-items:center;gap:4px">
-        <div style="width:50px;height:7px;background:var(--bg);border-radius:3px;overflow:hidden">
-          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
-        </div>
-        <span style="font-size:0.8em">${sch.weight}/${sch.maxWeight}</span>
-      </div>`;
+    const weightHtml = `<div style="display:flex;align-items:center;gap:4px">
+      <div style="width:50px;height:7px;background:var(--bg);border-radius:3px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
+      </div>
+      <span style="font-size:0.8em">${weight}/${maxWeight}</span>
+    </div>`;
 
-      // Status
-      if (sch.status === 'cooling') {
-        statusHtml = `<span style="color:var(--red)">冷却 ${sch.cooldownRemaining}s</span>`;
-      } else if (sch.status === 'probation') {
-        statusHtml = `<span style="color:var(--yellow)">观察期 ${sch.probationProgress}</span>`;
-      } else if (sch.status === 'warning') {
-        statusHtml = '<span style="color:var(--yellow)">低权重</span>';
-      } else if (a.dead) {
-        statusHtml = '<span style="color:var(--red)">不可用</span>';
-      } else {
-        statusHtml = '<span style="color:var(--green)">正常</span>';
-      }
-
-      freqHtml = `${sch.recentRequests}/${sch.rateLimit}`;
-      successFailHtml = `<span style="color:var(--green)">${sch.totalSuccess}</span>/<span style="color:var(--red)">${sch.totalFailure}</span>`;
+    // Status
+    let statusHtml;
+    if (sch.status === 'cooling') {
+      statusHtml = `<span style="color:var(--red)">冷却 ${sch.cooldownRemaining || 0}s</span>`;
+    } else if (sch.status === 'probation') {
+      statusHtml = `<span style="color:var(--yellow)">观察期 ${sch.probationProgress || ''}</span>`;
+    } else if (sch.status === 'warning') {
+      statusHtml = '<span style="color:var(--yellow)">低权重</span>';
+    } else if (a.dead) {
+      statusHtml = '<span style="color:var(--red)">不可用</span>';
     } else {
-      statusHtml = a.dead ? '<span style="color:var(--red)">不可用</span>' : '<span style="color:var(--green)">正常</span>';
+      statusHtml = '<span style="color:var(--green)">正常</span>';
     }
+
+    const freqHtml = `${sch.recentRequests || 0}/${sch.rateLimit || 10}`;
+    const successFailHtml = `<span style="color:var(--green)">${sch.totalSuccess || 0}</span>/<span style="color:var(--red)">${sch.totalFailure || 0}</span>`;
 
     // Action buttons
     const tokenPrefix = a.token.replace('...', '');
     let actions = `<button class="btn" style="background:var(--red);padding:2px 8px;font-size:0.78em" data-email="${a.email}">删除</button>`;
-    if (sch && (sch.status === 'cooling' || sch.status === 'probation')) {
+    if (sch.status === 'cooling' || sch.status === 'probation') {
       actions += ` <button class="btn" style="background:var(--yellow);color:#000;padding:2px 8px;font-size:0.78em" data-clear-cooldown="${tokenPrefix}">解冷却</button>`;
     }
-    if (sch) {
-      actions += ` <button class="btn" style="background:var(--border);padding:2px 8px;font-size:0.78em" data-reset-weight="${tokenPrefix}">重置权重</button>`;
-    }
+    actions += ` <button class="btn" style="background:var(--border);padding:2px 8px;font-size:0.78em" data-reset-weight="${tokenPrefix}">重置</button>`;
 
     return `<tr>
-      <td>${a.email}<div style="font-size:0.75em;color:var(--text-dim)">${a.token}</div></td>
-      <td>${visionLabel(a.visionCapable)}</td>
+      <td>${a.email}<div style="font-size:0.75em;color:var(--text-dim)">${a.token}${a.visionCapable === true ? ' · <span style="color:var(--green)">视觉</span>' : ''}</div></td>
       <td>${weightHtml}</td>
       <td>${statusHtml}</td>
       <td>${freqHtml}</td>
       <td>${successFailHtml}</td>
+      <td>${sch.dispatchCount || 0}</td>
       <td style="white-space:nowrap">${actions}</td>
     </tr>`;
   }).join('');

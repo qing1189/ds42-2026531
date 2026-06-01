@@ -542,6 +542,7 @@ export function resetAllSchedulerState() {
 
 /**
  * 获取单个 token 的调度器信息（用于账号管理视图）
+ * 如果 token 尚未在调度器中，自动创建初始条目并返回。
  * @param {string} token - 完整 token 或前缀
  */
 export function getTokenSchedulerInfo(token) {
@@ -558,7 +559,11 @@ export function getTokenSchedulerInfo(token) {
     }
   }
   
-  if (!entry) return null;
+  // 如果不存在，为其创建初始条目（确保账号管理界面始终能显示调度信息）
+  if (!entry) {
+    entry = createEntry();
+    schedulerState.set(token, entry);
+  }
   
   checkCooldown(entry);
   pruneRequestTimes(entry);

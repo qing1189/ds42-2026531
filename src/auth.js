@@ -468,17 +468,35 @@ export function listAccounts() {
   return tokenPool
     .filter(t => t.email)
     .map(t => {
-      const schedulerInfo = t.token ? getTokenSchedulerInfo(t.token) : null;
+      let schedulerInfo = null;
+      if (t.token) {
+        schedulerInfo = getTokenSchedulerInfo(t.token);
+      }
       return {
         email: t.email,
         token: t.token ? t.token.slice(0, 12) + '...' : 'NONE',
-        fullToken: t.token || null, // 用于前端操作（清除冷却/重置权重）
+        fullToken: t.token || null,
         visionCapable: t.visionCapable,
         errorCount: t.errorCount,
         activeRequests: t.activeRequests,
         dead: t.dead,
         maxConcurrent: MAX_CONCURRENT_PER_TOKEN,
-        scheduler: schedulerInfo,
+        scheduler: schedulerInfo || {
+          weight: 0,
+          maxWeight: 50,
+          status: t.dead ? 'cooling' : 'normal',
+          cooling: false,
+          cooldownRemaining: 0,
+          probation: false,
+          probationProgress: null,
+          consecutiveCooldowns: 0,
+          dispatchCount: 0,
+          recentRequests: 0,
+          rateLimit: 10,
+          totalSuccess: 0,
+          totalFailure: 0,
+          lastFailureType: null,
+        },
       };
     });
 }
