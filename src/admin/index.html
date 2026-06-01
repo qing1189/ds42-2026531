@@ -499,6 +499,53 @@ footer {
 
   <!-- 面板密码 -->
   <div class="card">
+    <h2>用量统计</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">按 DeepSeek 账号和 API Key 统计请求用量</p>
+    <div class="stats-grid" style="margin-bottom:16px">
+      <div class="stat-item">
+        <div class="label">总请求</div>
+        <div class="value" id="usageTotalReq">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">失败请求</div>
+        <div class="value" id="usageTotalFail" style="color:var(--red)">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">输入 Token</div>
+        <div class="value" id="usageTotalInput">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">输出 Token</div>
+        <div class="value" id="usageTotalOutput">0</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button class="btn" style="background:var(--red);padding:4px 14px;font-size:0.8em" id="resetAllUsageBtn">全部重置</button>
+    </div>
+
+    <h3 style="font-size:0.92em;margin-bottom:8px">按 DeepSeek 账号</h3>
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table>
+        <thead><tr><th>账号</th><th>总请求</th><th>失败</th><th>输入 Token</th><th>输出 Token</th><th>操作</th></tr></thead>
+        <tbody id="usageAccountBody">
+          <tr><td colspan="6" style="color:var(--text-dim)">无数据</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="font-size:0.92em;margin-bottom:8px">按 API Key</h3>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>API Key</th><th>总请求</th><th>失败</th><th>输入 Token</th><th>输出 Token</th><th>操作</th></tr></thead>
+        <tbody id="usageApiKeyBody">
+          <tr><td colspan="6" style="color:var(--text-dim)">无数据</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 面板密码 -->
+  <div class="card">
     <h2>面板密码</h2>
     <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:10px">用于登录本管理面板，与 API Key <strong>相互独立</strong>。设置后访问面板需输入此密码。修改将使现有登录失效。</p>
     <form id="passwordForm">
@@ -677,12 +724,12 @@ function setupRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const ms = parseInt($('interval').value);
   if (ms > 0) {
-    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); }, ms);
+    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); fetchUsage(); }, ms);
   }
 }
 
 $('interval').addEventListener('change', setupRefresh);
-$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); });
+$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); fetchUsage(); });
 $('clearSessionsBtn').addEventListener('click', clearSessions);
 
 // Auto-delete mode
@@ -995,6 +1042,114 @@ $('passwordForm').addEventListener('submit', async e => {
   }
 });
 
+// ---- Usage Statistics ----
+function formatNumber(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function maskApiKeyShort(key) {
+  if (!key) return '';
+  if (key.length <= 8) return key.slice(0, 2) + '****';
+  return key.slice(0, 6) + '...' + key.slice(-4);
+}
+
+async function fetchUsage() {
+  try {
+    const res = await apiFetch('/admin/api/usage');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) return;
+
+    // Total
+    $('usageTotalReq').textContent = formatNumber(data.total.totalRequests);
+    $('usageTotalFail').textContent = formatNumber(data.total.failedRequests);
+    $('usageTotalInput').textContent = formatNumber(data.total.inputTokens);
+    $('usageTotalOutput').textContent = formatNumber(data.total.outputTokens);
+
+    // Account table
+    const aBody = $('usageAccountBody');
+    if (!data.accounts || data.accounts.length === 0) {
+      aBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无数据</td></tr>';
+    } else {
+      aBody.innerHTML = data.accounts.map(a => `<tr>
+        <td>${a.account}</td>
+        <td>${formatNumber(a.totalRequests)}</td>
+        <td>${a.failedRequests > 0 ? '<span style="color:var(--red)">' + a.failedRequests + '</span>' : '0'}</td>
+        <td>${formatNumber(a.inputTokens)}</td>
+        <td>${formatNumber(a.outputTokens)}</td>
+        <td><button class="btn" style="background:var(--border);padding:3px 10px;font-size:0.8em" data-usage-account="${a.account}">重置</button></td>
+      </tr>`).join('');
+      aBody.querySelectorAll('button[data-usage-account]').forEach(btn =>
+        btn.addEventListener('click', () => resetAccountUsage(btn.dataset.usageAccount)));
+    }
+
+    // API Key table
+    const kBody = $('usageApiKeyBody');
+    if (!data.apiKeys || data.apiKeys.length === 0) {
+      kBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无数据</td></tr>';
+    } else {
+      kBody.innerHTML = data.apiKeys.map(k => `<tr>
+        <td>${maskApiKeyShort(k.apiKey)}</td>
+        <td>${formatNumber(k.totalRequests)}</td>
+        <td>${k.failedRequests > 0 ? '<span style="color:var(--red)">' + k.failedRequests + '</span>' : '0'}</td>
+        <td>${formatNumber(k.inputTokens)}</td>
+        <td>${formatNumber(k.outputTokens)}</td>
+        <td><button class="btn" style="background:var(--border);padding:3px 10px;font-size:0.8em" data-usage-apikey="${k.apiKey}">重置</button></td>
+      </tr>`).join('');
+      kBody.querySelectorAll('button[data-usage-apikey]').forEach(btn =>
+        btn.addEventListener('click', () => resetApiKeyUsage(btn.dataset.usageApikey)));
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('fetchUsage error:', e);
+  }
+}
+
+$('resetAllUsageBtn').addEventListener('click', async () => {
+  if (!confirm('确认重置所有用量统计？此操作不可恢复。')) return;
+  try {
+    const res = await apiFetch('/admin/api/usage/reset', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) fetchUsage();
+    else alert(data.message || '重置失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+});
+
+async function resetAccountUsage(account) {
+  if (!confirm('确认重置账号 ' + account + ' 的用量统计？')) return;
+  try {
+    const res = await apiFetch('/admin/api/usage/reset/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account }),
+    });
+    const data = await res.json();
+    if (data.success) fetchUsage();
+    else alert(data.message || '重置失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+async function resetApiKeyUsage(apiKey) {
+  if (!confirm('确认重置此 API Key 的用量统计？')) return;
+  try {
+    const res = await apiFetch('/admin/api/usage/reset/apikey', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await res.json();
+    if (data.success) fetchUsage();
+    else alert(data.message || '重置失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
 // ---- Login Proxy management ----
 async function fetchProxyConfig() {
   try {
@@ -1127,6 +1282,7 @@ function startPanel() {
   setupRefresh();
   loadApiKeys();
   fetchProxyConfig();
+  fetchUsage();
 }
 
 async function boot() {

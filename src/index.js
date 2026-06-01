@@ -10,6 +10,7 @@ import { getQueueInfo } from './queue.js';
 import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChatLogs, listLogDates } from './logger.js';
 import { getMetrics, getTimeseries } from './metrics.js';
 import { getProxyConfig, setManualProxy, setXiequApiUrl, fetchXiequProxy, checkProxy, restoreProxyConfig } from './proxy.js';
+import { getAllUsageStats, resetAllUsage, resetApiKeyUsage, resetAccountUsage } from './usage.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
@@ -246,6 +247,36 @@ app.post('/admin/api/proxy/check', async (req, res) => {
   }
   const result = await checkProxy(proxyUrl);
   res.json({ success: true, ...result });
+});
+
+// --- Usage statistics (用量统计) ---
+app.get('/admin/api/usage', (req, res) => {
+  res.json({ success: true, ...getAllUsageStats() });
+});
+
+app.post('/admin/api/usage/reset', (req, res) => {
+  const result = resetAllUsage();
+  res.json(result);
+});
+
+app.post('/admin/api/usage/reset/apikey', (req, res) => {
+  const { apiKey } = req.body || {};
+  if (!apiKey) {
+    return res.status(400).json({ error: { message: 'apiKey required' } });
+  }
+  const result = resetApiKeyUsage(apiKey);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+app.post('/admin/api/usage/reset/account', (req, res) => {
+  const { account } = req.body || {};
+  if (!account) {
+    return res.status(400).json({ error: { message: 'account required' } });
+  }
+  const result = resetAccountUsage(account);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
 });
 
 // --- Session cache management (hot-reload) ---
