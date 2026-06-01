@@ -3,7 +3,7 @@ config();
 
 import express from 'express';
 import { initTokenPool, getPoolInfo, getTotalCapacity, addTokenToPool, loginAndAddToken, getAliveTokens, startHealthCheck, addAccountToPool, listAccounts, removeAccountFromPool, removeTokenFromPool } from './auth.js';
-import { prewarmSessions, getSessionInfo, deleteSession, clearAllSessions } from './session.js';
+import { prewarmSessions, getSessionInfo, deleteSession, clearAllSessions, getAutoDeleteMode, setAutoDeleteMode } from './session.js';
 import { handleOpenAICompletion, handleOpenAIModels } from './openai.js';
 import { handleDeepSeekCompletion } from './deepseek.js';
 import { getQueueInfo } from './queue.js';
@@ -107,6 +107,7 @@ app.get('/admin/api/stats', (req, res) => {
     totalCapacity: getTotalCapacity(),
     queue: getQueueInfo(),
     sessions: getSessionInfo(),
+    autoDeleteMode: getAutoDeleteMode(),
     logStats: getLogStats(),
   });
 });
@@ -205,13 +206,31 @@ app.post('/admin/api/session/delete', (req, res) => {
   if (!cacheKey) {
     return res.status(400).json({ error: { message: 'cacheKey required' } });
   }
-  const result = deleteSession(cacheKey);
-  if (result.success) res.json(result);
-  else res.status(400).json(result);
+  deleteSession(cacheKey).then(result => {
+    if (result.success) res.json(result);
+    else res.status(400).json(result);
+  }).catch(err => res.status(500).json({ error: { message: err.message } }));
 });
 
 app.post('/admin/api/session/clear', (req, res) => {
-  res.json(clearAllSessions());
+  clearAllSessions().then(result => {
+    res.json(result);
+  }).catch(err => res.status(500).json({ error: { message: err.message } }));
+});
+
+// --- Auto-delete mode management ---
+app.get('/admin/api/session/auto-delete', (req, res) => {
+  res.json({ success: true, mode: getAutoDeleteMode() });
+});
+
+app.post('/admin/api/session/auto-delete', (req, res) => {
+  const { mode } = req.body || {};
+  if (!mode) {
+    return res.status(400).json({ error: { message: 'mode required (none | single | all)' } });
+  }
+  const result = setAutoDeleteMode(mode);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
 });
 
 // Admin: API key management (hot-reload)

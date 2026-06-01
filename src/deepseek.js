@@ -1,6 +1,7 @@
 import { completion, parseSSEStream } from './chat.js';
 import { pickToken } from './auth.js';
 import { dispatchQueued } from './queue.js';
+import { autoDeleteAfterCompletion } from './session.js';
 
 const MODEL_MAP = {
   'deepseek-v4-flash': 'default',
@@ -24,8 +25,14 @@ export async function handleDeepSeekCompletion(req, res) {
     return res.status(400).json({ code: 1, msg: 'prompt is required' });
   }
 
+  let slot = null;
+  let completionSessionId = null;
+
   try {
-    const { body: streamBody, slot } = await completion({ modelType, prompt, thinkingEnabled, searchEnabled, parentMessageId, refFileIds });
+    const result = await completion({ modelType, prompt, thinkingEnabled, searchEnabled, parentMessageId, refFileIds });
+    slot = result.slot;
+    completionSessionId = result.sessionId;
+    const streamBody = result.body;
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -51,7 +58,11 @@ export async function handleDeepSeekCompletion(req, res) {
       res.end();
     }
   } finally {
-    slot.release();
+    if (slot) {
+      // Auto-delete session on DeepSeek based on AUTO_DELETE mode
+      autoDeleteAfterCompletion(slot.token, completionSessionId).catch(() => {});
+      slot.release();
+    }
     dispatchQueued();
   }
 }
