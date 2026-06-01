@@ -2,6 +2,7 @@ import { completion, parseSSEStream } from './chat.js';
 import { resolveImageToRefId } from './upload.js';
 import { enqueueRequest, dispatchQueued } from './queue.js';
 import { recordTTFB, recordTokenSpeed } from './metrics.js';
+import { autoDeleteAfterCompletion } from './session.js';
 
 const MODEL_MAP = {
   'deepseek-v4-flash': 'default',
@@ -97,7 +98,7 @@ export async function handleOpenAICompletion(req, res) {
     return res.status(500).json({ error: { message: err.message } });
   }
 
-  const { body: streamBody, slot } = result;
+  const { body: streamBody, slot, sessionId: completionSessionId } = result;
 
   try {
     if (stream) {
@@ -260,6 +261,8 @@ export async function handleOpenAICompletion(req, res) {
   } finally {
     slot.release();
     dispatchQueued();
+    // Auto-delete session on DeepSeek based on AUTO_DELETE mode
+    autoDeleteAfterCompletion(slot.token, completionSessionId).catch(() => {});
   }
 }
 

@@ -61,7 +61,7 @@ export async function completion({ modelType, prompt, thinkingEnabled = false, s
     }
 
     reportTokenSuccess(slot.token);
-    return { body: res.body, slot };
+    return { body: res.body, slot, sessionId: session.id };
   } catch (err) {
     slot.release();
     dispatchQueued();

@@ -320,6 +320,16 @@ footer {
       <div id="sessionSummary" style="font-size:0.88em;color:var(--text-dim)">-</div>
       <button class="btn" id="clearSessionsBtn" style="padding:4px 14px;font-size:0.8em;background:var(--red)">清空全部</button>
     </div>
+    <!-- Auto-delete mode -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+      <label style="font-size:0.88em;color:var(--text-dim);white-space:nowrap">自动删除模式:</label>
+      <select id="autoDeleteMode" style="flex:1;padding:6px 10px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.88em">
+        <option value="none">none — 保持会话</option>
+        <option value="single">single — 每次对话后删除当前会话</option>
+        <option value="all">all — 每次对话后删除所有会话</option>
+      </select>
+      <button class="btn" id="saveAutoDeleteBtn" style="padding:4px 14px;font-size:0.8em">保存</button>
+    </div>
     <div style="overflow-x:auto">
       <table>
         <thead>
@@ -607,6 +617,11 @@ function render(data) {
       btn.addEventListener('click', () => deleteSessionByKey(btn.dataset.key)));
   }
 
+  // Auto-delete mode
+  if (data.autoDeleteMode) {
+    $('autoDeleteMode').value = data.autoDeleteMode;
+  }
+
   $('lastRefresh').textContent = new Date().toLocaleTimeString();
 }
 
@@ -635,6 +650,26 @@ function setupRefresh() {
 $('interval').addEventListener('change', setupRefresh);
 $('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); });
 $('clearSessionsBtn').addEventListener('click', clearSessions);
+
+// Auto-delete mode
+$('saveAutoDeleteBtn').addEventListener('click', async () => {
+  const mode = $('autoDeleteMode').value;
+  try {
+    const res = await apiFetch('/admin/api/session/auto-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      alert(data.message || '设置成功');
+    } else {
+      alert(data.error?.message || data.message || '设置失败');
+    }
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  }
+});
 
 // Panel login
 $('authSubmitBtn').addEventListener('click', async () => {
