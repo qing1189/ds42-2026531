@@ -3,6 +3,7 @@ import { resolveImageToRefId } from './upload.js';
 import { enqueueRequest, dispatchQueued } from './queue.js';
 import { recordTTFB, recordTokenSpeed } from './metrics.js';
 import { autoDeleteAfterCompletion } from './session.js';
+import { recordUsage } from './usage.js';
 
 const MODEL_MAP = {
   'deepseek-v4-flash': 'default',
@@ -75,6 +76,12 @@ export async function handleOpenAICompletion(req, res) {
   // Set merge_thinking=true or MERGE_THINKING=true to merge into content with <arg_key> tags instead
   const mergeThinking = req.body.merge_thinking ?? (process.env.MERGE_THINKING === 'true');
 
+  // Extract API Key for usage tracking
+  const authHeader = req.headers['authorization'];
+  const reqApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  // Estimate input tokens (rough: ~4 chars per token for Chinese/English mix)
+  const estimatedInputTokens = Math.ceil(prompt.length / 4);
+
   const requestId = `chatcmpl-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const requestStart = Date.now();
   let result;
@@ -95,6 +102,14 @@ export async function handleOpenAICompletion(req, res) {
     result = await completion({ modelType, prompt, thinkingEnabled, searchEnabled, refFileIds, preferVision: modelType === 'vision' });
   } catch (err) {
     console.error('Completion error:', err.message);
+    // Record failed usage (completion setup failed)
+    recordUsage({
+      apiKey: reqApiKey,
+      account: null,
+      inputTokens: estimatedInputTokens,
+      outputTokens: 0,
+      failed: true,
+    });
     return res.status(500).json({ error: { message: err.message } });
   }
 
@@ -196,6 +211,14 @@ export async function handleOpenAICompletion(req, res) {
           if (streamUsage > 0 && streamDuration > 0) {
             recordTokenSpeed(model, streamUsage, streamDuration);
           }
+          // Record successful usage
+          recordUsage({
+            apiKey: reqApiKey,
+            account: slot?.account?.email || null,
+            inputTokens: estimatedInputTokens,
+            outputTokens: streamUsage || 0,
+            failed: false,
+          });
         }
       }
       res.end();
@@ -226,6 +249,15 @@ export async function handleOpenAICompletion(req, res) {
       if (usage > 0 && totalDuration > 0) {
         recordTokenSpeed(model, usage, totalDuration);
       }
+
+      // Record successful usage
+      recordUsage({
+        apiKey: reqApiKey,
+        account: slot?.account?.email || null,
+        inputTokens: estimatedInputTokens,
+        outputTokens: usage || 0,
+        failed: false,
+      });
 
       const response = {
         id: requestId,
@@ -258,6 +290,14 @@ export async function handleOpenAICompletion(req, res) {
     } else {
       res.end();
     }
+    // Record failed usage
+    recordUsage({
+      apiKey: reqApiKey,
+      account: slot?.account?.email || null,
+      inputTokens: estimatedInputTokens,
+      outputTokens: 0,
+      failed: true,
+    });
   } finally {
     slot.release();
     dispatchQueued();

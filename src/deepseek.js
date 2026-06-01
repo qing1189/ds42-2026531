@@ -2,6 +2,7 @@ import { completion, parseSSEStream } from './chat.js';
 import { pickToken } from './auth.js';
 import { dispatchQueued } from './queue.js';
 import { autoDeleteAfterCompletion } from './session.js';
+import { recordUsage } from './usage.js';
 
 const MODEL_MAP = {
   'deepseek-v4-flash': 'default',
@@ -25,8 +26,15 @@ export async function handleDeepSeekCompletion(req, res) {
     return res.status(400).json({ code: 1, msg: 'prompt is required' });
   }
 
+  // Extract API Key for usage tracking
+  const authHeader = req.headers['authorization'];
+  const reqApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  // Estimate input tokens
+  const estimatedInputTokens = Math.ceil(prompt.length / 4);
+
   let slot = null;
   let completionSessionId = null;
+  let outputTokens = 0;
 
   try {
     const result = await completion({ modelType, prompt, thinkingEnabled, searchEnabled, parentMessageId, refFileIds });
@@ -44,12 +52,25 @@ export async function handleDeepSeekCompletion(req, res) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        // Try to extract token usage from the stream data
+        const text = new TextDecoder().decode(value);
+        const usageMatch = text.match(/"accumulated_token_usage"\s*:\s*(\d+)/);
+        if (usageMatch) outputTokens = parseInt(usageMatch[1]);
         res.write(value);
       }
     } finally {
       reader.releaseLock();
     }
     res.end();
+
+    // Record successful usage
+    recordUsage({
+      apiKey: reqApiKey,
+      account: slot?.account?.email || null,
+      inputTokens: estimatedInputTokens,
+      outputTokens,
+      failed: false,
+    });
   } catch (err) {
     console.error('DeepSeek completion error:', err.message);
     if (!res.headersSent) {
@@ -57,6 +78,14 @@ export async function handleDeepSeekCompletion(req, res) {
     } else {
       res.end();
     }
+    // Record failed usage
+    recordUsage({
+      apiKey: reqApiKey,
+      account: slot?.account?.email || null,
+      inputTokens: estimatedInputTokens,
+      outputTokens: 0,
+      failed: true,
+    });
   } finally {
     if (slot) {
       // Auto-delete session on DeepSeek based on AUTO_DELETE mode
