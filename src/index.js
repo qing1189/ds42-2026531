@@ -9,6 +9,7 @@ import { handleDeepSeekCompletion } from './deepseek.js';
 import { getQueueInfo } from './queue.js';
 import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChatLogs, listLogDates } from './logger.js';
 import { getMetrics, getTimeseries } from './metrics.js';
+import { getProxyConfig, setManualProxy, setXiequApiUrl, fetchXiequProxy, checkProxy, restoreProxyConfig } from './proxy.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
@@ -207,6 +208,44 @@ app.post('/admin/api/account/remove', (req, res) => {
   const result = removeAccountFromPool(email);
   if (result.success) res.json(result);
   else res.status(400).json(result);
+});
+
+// --- Login Proxy management (仅用于添加账号时绕过 WAF，不影响 API 转发) ---
+app.get('/admin/api/proxy', (req, res) => {
+  res.json({ success: true, ...getProxyConfig() });
+});
+
+app.post('/admin/api/proxy/manual', (req, res) => {
+  const { proxyUrl } = req.body || {};
+  setManualProxy(proxyUrl || '');
+  res.json({ success: true, message: proxyUrl ? '手动代理已设置' : '手动代理已清除' });
+});
+
+app.post('/admin/api/proxy/xiequ', (req, res) => {
+  const { apiUrl } = req.body || {};
+  if (apiUrl && !apiUrl.startsWith('http://') && !apiUrl.startsWith('https://')) {
+    return res.status(400).json({ error: { message: '携趣 API 地址需以 http:// 或 https:// 开头' } });
+  }
+  setXiequApiUrl(apiUrl || '');
+  res.json({ success: true, message: apiUrl ? '携趣 API 已设置' : '携趣 API 已清除' });
+});
+
+app.post('/admin/api/proxy/xiequ/test', async (req, res) => {
+  const { proxy, error } = await fetchXiequProxy();
+  if (!proxy) {
+    return res.status(502).json({ success: false, error: { message: error || '提取失败' } });
+  }
+  const check = await checkProxy(proxy);
+  res.json({ success: true, proxy, check });
+});
+
+app.post('/admin/api/proxy/check', async (req, res) => {
+  const { proxyUrl } = req.body || {};
+  if (!proxyUrl) {
+    return res.status(400).json({ error: { message: 'proxyUrl required' } });
+  }
+  const result = await checkProxy(proxyUrl);
+  res.json({ success: true, ...result });
 });
 
 // --- Session cache management (hot-reload) ---
