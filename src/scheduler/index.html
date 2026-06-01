@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调度管理 - DeepSeek-2API</title>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--border:#0f3460;--text:#e0e0e0;--text-dim:#8892a0;--green:#00e676;--yellow:#ffd600;--red:#ff1744;--accent:#00b0ff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh}
+.container{max-width:1100px;margin:0 auto;padding:20px}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:20px}
+header h1{font-size:1.3em;color:var(--accent)}
+header .meta{font-size:0.85em;color:var(--text-dim)}
+.nav{display:flex;gap:8px}
+.nav a{font-size:0.85em;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:4px}
+.nav a:hover{border-color:var(--accent)}
+.controls{display:flex;align-items:center;gap:8px}
+.controls select,.controls button{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:0.85em;cursor:pointer}
+.controls button:hover{border-color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:16px}
+.card h2{font-size:1.05em;margin-bottom:12px;color:var(--accent)}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.stat-item{background:var(--bg);border-radius:6px;padding:12px;text-align:center}
+.stat-item .label{font-size:0.75em;color:var(--text-dim);margin-bottom:4px}
+.stat-item .value{font-size:1.4em;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:0.88em}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--text-dim);font-weight:600;font-size:0.8em;text-transform:uppercase;letter-spacing:0.5px}
+td{font-family:'SF Mono','Consolas',monospace;font-size:0.85em}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:4px;padding:7px 18px;font-size:0.9em;cursor:pointer}
+.btn:hover{opacity:0.85}
+.btn-sm{padding:3px 10px;font-size:0.8em}
+.btn-red{background:var(--red)}
+.btn-yellow{background:var(--yellow);color:#000}
+.btn-border{background:var(--border)}
+footer{text-align:center;color:var(--text-dim);font-size:0.78em;padding:12px}
+.auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:100}
+.auth-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:340px}
+.auth-box h3{margin-bottom:12px;color:var(--accent)}
+.form-group{margin-bottom:10px}
+.form-group label{display:block;font-size:0.82em;color:var(--text-dim);margin-bottom:4px}
+.form-group input{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:7px 10px;font-size:0.9em}
+.msg{font-size:0.82em;margin-top:6px;min-height:1.4em}
+.msg-ok{color:var(--green)}.msg-err{color:var(--red)}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>调度管理</h1>
+      <div class="meta">智能权重调度 · 风控防护</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="nav">
+        <a href="/admin">管理面板</a>
+        <a href="/playground">API 测试</a>
+      </div>
+      <div class="controls">
+        <select id="interval" title="自动刷新间隔">
+          <option value="5000" selected>5秒</option>
+          <option value="10000">10秒</option>
+          <option value="30000">30秒</option>
+          <option value="0">关闭</option>
+        </select>
+        <button id="refreshBtn">刷新</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 全局状态 -->
+  <div class="card">
+    <h2>全局状态</h2>
+    <div id="globalStatus" style="margin-bottom:12px;padding:10px 14px;background:var(--bg);border-radius:6px;font-size:0.9em">加载中...</div>
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="label">最小间隔</div>
+        <div class="value" id="cfgInterval">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">频率限制</div>
+        <div class="value" id="cfgRate">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">冷却时长</div>
+        <div class="value" id="cfgCooldown">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">观察期</div>
+        <div class="value" id="cfgProbation">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">深夜时段</div>
+        <div class="value" id="cfgNight">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">全局阈值</div>
+        <div class="value" id="cfgGlobal">-</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px;gap:8px">
+      <button class="btn btn-border btn-sm" id="configBtn">修改配置</button>
+      <button class="btn btn-red btn-sm" id="resetAllBtn">全部重置</button>
+    </div>
+  </div>
+
+  <!-- 令牌调度列表 -->
+  <div class="card">
+    <h2>令牌调度状态</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">按令牌维度管理调度权重、冷却、频率。支持手动清除冷却和重置权重。</p>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>令牌</th>
+            <th>权重</th>
+            <th>状态</th>
+            <th>调度次数</th>
+            <th>频率(近1分钟)</th>
+            <th>成功 / 失败</th>
+            <th>最近错误</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="schBody">
+          <tr><td colspan="8" style="color:var(--text-dim)">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>上次刷新: <span id="lastRefresh">-</span></footer>
+</div>
+
+<!-- Auth overlay -->
+<div class="auth-overlay" id="authOverlay" style="display:none">
+  <div class="auth-box">
+    <h3>面板登录</h3>
+    <p style="font-size:0.85em;color:var(--text-dim);margin-bottom:12px">请输入面板密码以继续。</p>
+    <div class="form-group">
+      <label>面板密码</label>
+      <input type="password" id="authKeyInput" placeholder="输入面板密码...">
+    </div>
+    <button class="btn" id="authSubmitBtn">登录</button>
+    <div class="msg" id="authMsg"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let refreshTimer = null;
+
+function getPanelToken() { return sessionStorage.getItem('panelToken') || ''; }
+function authHeaders() { const t = getPanelToken(); return t ? { 'Authorization': 'Bearer ' + t } : {}; }
+
+async function apiFetch(url, options = {}) {
+  const headers = { ...authHeaders(), ...(options.headers || {}) };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    sessionStorage.removeItem('panelToken');
+    $('authOverlay').style.display = 'flex';
+    throw new Error('unauthorized');
+  }
+  return res;
+}
+
+// Auth
+$('authSubmitBtn').addEventListener('click', async () => {
+  const pw = $('authKeyInput').value;
+  if (!pw) { $('authMsg').className = 'msg msg-err'; $('authMsg').textContent = '请输入密码'; return; }
+  try {
+    const res = await fetch('/admin/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (data.token) sessionStorage.setItem('panelToken', data.token);
+      $('authOverlay').style.display = 'none';
+      loadData();
+    } else {
+      $('authMsg').className = 'msg msg-err'; $('authMsg').textContent = data.error?.message || '密码错误';
+    }
+  } catch { $('authMsg').className = 'msg msg-err'; $('authMsg').textContent = '请求失败'; }
+});
+$('authKeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('authSubmitBtn').click(); });
+
+// Helpers
+function failureTypeLabel(type) {
+  const map = { '429': '429 限流', 'waf': 'WAF 拦截', 'token_invalid': 'Token失效', 'banned': '账号封禁', 'server_error': '服务端错误', 'generic': '其他' };
+  return map[type] || type || '-';
+}
+
+function failureTypeColor(type) {
+  const map = { '429': 'var(--yellow)', 'waf': 'var(--red)', 'token_invalid': 'var(--yellow)', 'banned': 'var(--red)', 'server_error': 'var(--text-dim)', 'generic': 'var(--text-dim)' };
+  return map[type] || 'var(--text-dim)';
+}
+
+// Main data fetch
+async function loadData() {
+  try {
+    const res = await apiFetch('/admin/api/scheduler');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) return;
+    render(data);
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('loadData error:', e);
+  }
+}
+
+function render(data) {
+  const cfg = data.config;
+  const g = data.global;
+  const env = data.environment;
+
+  // Config stats
+  $('cfgInterval').textContent = (cfg.MIN_INTERVAL / 1000).toFixed(1) + 's';
+  $('cfgRate').textContent = cfg.RATE_LIMIT + '/' + (cfg.RATE_WINDOW / 1000) + 's';
+  $('cfgCooldown').textContent = (cfg.COOLDOWN_DURATION / 1000) + 's';
+  $('cfgProbation').textContent = cfg.PROBATION_SUCCESS_REQUIRED + '次';
+  $('cfgNight').textContent = cfg.NIGHT_START_HOUR + ':00-' + cfg.NIGHT_END_HOUR + ':00';
+  $('cfgGlobal').textContent = cfg.GLOBAL_FAIL_THRESHOLD + '/' + (cfg.GLOBAL_FAIL_WINDOW / 1000) + 's';
+
+  // Global status
+  let html = '';
+  if (g.slowdownActive) {
+    html += `<span style="color:var(--red);font-weight:600">&#9888; 全局降速中</span> (剩余 ${g.slowdownRemaining}s) &nbsp;`;
+  }
+  if (env.isNightMode) {
+    html += `<span style="color:var(--yellow)">&#127769; 深夜模式生效</span> (${env.nightHours}) &nbsp;`;
+  }
+  if (!g.slowdownActive && !env.isNightMode) {
+    html += `<span style="color:var(--green)">&#10003; 正常运行</span> &nbsp;`;
+  }
+  html += `<span style="color:var(--text-dim)">窗口内失败: ${g.recentFailureCount}/${g.failThreshold}</span>`;
+  $('globalStatus').innerHTML = html;
+
+  // Token table
+  const body = $('schBody');
+  if (!data.entries || data.entries.length === 0) {
+    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim)">暂无调度数据（首次 API 请求后自动出现）</td></tr>';
+  } else {
+    body.innerHTML = data.entries.map(e => {
+      const pct = Math.round((e.weight / e.maxWeight) * 100);
+      const barColor = e.status === 'cooling' ? 'var(--red)' : e.status === 'probation' ? 'var(--yellow)' : e.weight < 10 ? 'var(--yellow)' : 'var(--green)';
+
+      let statusHtml;
+      if (e.status === 'cooling') {
+        statusHtml = `<span style="color:var(--red)">冷却中 ${e.cooldownRemaining}s</span>`;
+      } else if (e.status === 'probation') {
+        statusHtml = `<span style="color:var(--yellow)">观察期 ${e.probationProgress}</span>`;
+      } else if (e.status === 'warning') {
+        statusHtml = '<span style="color:var(--yellow)">低权重</span>';
+      } else {
+        statusHtml = '<span style="color:var(--green)">正常</span>';
+      }
+
+      const tokenPrefix = e.token.replace('...', '');
+      let actions = '';
+      if (e.status === 'cooling' || e.status === 'probation') {
+        actions += `<button class="btn btn-yellow btn-sm" data-clear="${tokenPrefix}">解冷却</button> `;
+      }
+      actions += `<button class="btn btn-border btn-sm" data-reset="${tokenPrefix}">重置权重</button>`;
+
+      return `<tr>
+        <td>${e.token}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:60px;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
+              <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px"></div>
+            </div>
+            <span>${e.weight}/${e.maxWeight}</span>
+          </div>
+        </td>
+        <td>${statusHtml}</td>
+        <td>${e.dispatchCount}</td>
+        <td>${e.recentRequests}/${e.rateLimit}</td>
+        <td><span style="color:var(--green)">${e.totalSuccess}</span> / <span style="color:var(--red)">${e.totalFailure}</span></td>
+        <td style="color:${failureTypeColor(e.lastFailureType)}">${failureTypeLabel(e.lastFailureType)}</td>
+        <td style="white-space:nowrap">${actions}</td>
+      </tr>`;
+    }).join('');
+
+    body.querySelectorAll('button[data-clear]').forEach(btn =>
+      btn.addEventListener('click', () => clearCooldown(btn.dataset.clear)));
+    body.querySelectorAll('button[data-reset]').forEach(btn =>
+      btn.addEventListener('click', () => resetWeight(btn.dataset.reset)));
+  }
+
+  $('lastRefresh').textContent = new Date().toLocaleTimeString();
+}
+
+// Actions
+async function clearCooldown(tokenPrefix) {
+  try {
+    const res = await apiFetch('/admin/api/account/clear-cooldown', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenPrefix }),
+    });
+    const data = await res.json();
+    if (data.success) loadData();
+    else alert(data.message || '操作失败');
+  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
+}
+
+async function resetWeight(tokenPrefix) {
+  if (!confirm('确认重置令牌 ' + tokenPrefix + '... 的调度权重？')) return;
+  try {
+    const res = await apiFetch('/admin/api/scheduler/reset/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenPrefix }),
+    });
+    const data = await res.json();
+    if (data.success) loadData();
+    else alert(data.message || '重置失败');
+  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
+}
+
+$('resetAllBtn').addEventListener('click', async () => {
+  if (!confirm('确认重置所有令牌的调度状态？权重将恢复初始值，冷却将全部解除。')) return;
+  try {
+    const res = await apiFetch('/admin/api/scheduler/reset', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) loadData();
+    else alert(data.message || '重置失败');
+  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
+});
+
+$('configBtn').addEventListener('click', async () => {
+  try {
+    const res = await apiFetch('/admin/api/scheduler/config');
+    const data = await res.json();
+    if (!data.success) return;
+    const cfg = data.config;
+    const input = prompt(
+      '修改调度器配置（JSON 格式，仅填需要修改的字段）\n\n' +
+      '当前配置：\n' +
+      `  权重: 成功+${cfg.SUCCESS_INCREMENT}, 失败-${cfg.FAILURE_DECREMENT}, 最大=${cfg.MAX_WEIGHT}\n` +
+      `  冷却: 阈值<${cfg.COOLDOWN_THRESHOLD}, 时长=${cfg.COOLDOWN_DURATION/1000}s, 恢复权重=${cfg.COOLDOWN_RECOVERY_WEIGHT}\n` +
+      `  间隔: 最小=${cfg.MIN_INTERVAL}ms, 抖动=${cfg.MAX_JITTER}ms\n` +
+      `  频率: ${cfg.RATE_LIMIT}次/${cfg.RATE_WINDOW/1000}s\n` +
+      `  观察期: 需连续成功${cfg.PROBATION_SUCCESS_REQUIRED}次\n` +
+      `  深夜: ${cfg.NIGHT_START_HOUR}:00-${cfg.NIGHT_END_HOUR}:00, 频率x${cfg.NIGHT_RATE_MULTIPLIER}\n` +
+      `  全局: ${cfg.GLOBAL_FAIL_THRESHOLD}个token/${cfg.GLOBAL_FAIL_WINDOW/1000}s 触发降速${cfg.GLOBAL_SLOWDOWN_DURATION/1000}s\n\n` +
+      '示例: {"MIN_INTERVAL":5000,"RATE_LIMIT":8}',
+      JSON.stringify({ MIN_INTERVAL: cfg.MIN_INTERVAL, RATE_LIMIT: cfg.RATE_LIMIT })
+    );
+    if (!input) return;
+    const updates = JSON.parse(input);
+    const saveRes = await apiFetch('/admin/api/scheduler/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const saveData = await saveRes.json();
+    if (saveData.success) {
+      alert('配置已更新（' + saveData.changed + ' 个参数）');
+      loadData();
+    }
+  } catch (e) { if (e.message !== 'unauthorized') alert('操作失败: ' + e.message); }
+});
+
+// Refresh
+function setupRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const ms = parseInt($('interval').value);
+  if (ms > 0) refreshTimer = setInterval(loadData, ms);
+}
+$('interval').addEventListener('change', setupRefresh);
+$('refreshBtn').addEventListener('click', loadData);
+
+// Boot
+async function boot() {
+  try {
+    const cfg = await fetch('/admin/api/config').then(r => r.json());
+    if (cfg.panelAuthRequired && !getPanelToken()) {
+      $('authOverlay').style.display = 'flex';
+      return;
+    }
+  } catch {}
+  loadData();
+  setupRefresh();
+}
+boot();
+</script>
+</body>
+</html>

@@ -257,6 +257,7 @@ footer {
     </div>
     <div class="controls">
       <a href="/playground" style="font-size:0.85em;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:4px">API 测试</a>
+      <a href="/scheduler" style="font-size:0.85em;color:var(--accent);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:4px">调度管理</a>
       <select id="interval" title="自动刷新间隔">
         <option value="5000">5秒</option>
         <option value="10000" selected>10秒</option>
@@ -405,9 +406,9 @@ footer {
     <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">支持 <strong>邮箱或手机号</strong> 登录；添加 / 删除立即生效（热加载）。删除账号会一并移除其令牌。</p>
     <div style="overflow-x:auto;margin-bottom:16px">
       <table>
-        <thead><tr><th>账号</th><th>权重</th><th>状态</th><th>频率</th><th>成功/失败</th><th>调度次</th><th>操作</th></tr></thead>
+        <thead><tr><th>账号</th><th>令牌</th><th>视觉</th><th>错误</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="accountBody">
-          <tr><td colspan="7" class="loading">加载中...</td></tr>
+          <tr><td colspan="6" class="loading">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -494,48 +495,6 @@ footer {
           <div class="msg" id="xiequMsg"></div>
         </form>
       </div>
-    </div>
-  </div>
-
-  <!-- 智能调度 -->
-  <div class="card">
-    <h2>智能调度 v2</h2>
-    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">权重调度 + 失败分类 + 渐进恢复 + 时间段策略 + 全局自适应 — 多层风控防护</p>
-
-    <!-- 全局状态指示器 -->
-    <div id="schGlobalStatus" style="margin-bottom:12px;padding:10px 14px;background:var(--bg);border-radius:6px;border:1px solid var(--border);font-size:0.88em">
-      加载中...
-    </div>
-
-    <div class="stats-grid" style="margin-bottom:12px">
-      <div class="stat-item">
-        <div class="label">最小间隔</div>
-        <div class="value" id="schMinInterval">-</div>
-      </div>
-      <div class="stat-item">
-        <div class="label">频率限制</div>
-        <div class="value" id="schRateLimit">-</div>
-      </div>
-      <div class="stat-item">
-        <div class="label">冷却时长</div>
-        <div class="value" id="schCooldown">-</div>
-      </div>
-      <div class="stat-item">
-        <div class="label">观察期要求</div>
-        <div class="value" id="schProbation">-</div>
-      </div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
-      <button class="btn" style="background:var(--border);padding:4px 14px;font-size:0.8em" id="schConfigBtn">调参</button>
-      <button class="btn" style="background:var(--red);padding:4px 14px;font-size:0.8em" id="schResetAllBtn">全部重置</button>
-    </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th>令牌</th><th>权重</th><th>状态</th><th>调度次</th><th>频率</th><th>成功/失败</th><th>最近错误</th><th>操作</th></tr></thead>
-        <tbody id="schBody">
-          <tr><td colspan="8" style="color:var(--text-dim)">无数据</td></tr>
-        </tbody>
-      </table>
     </div>
   </div>
 
@@ -766,12 +725,12 @@ function setupRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const ms = parseInt($('interval').value);
   if (ms > 0) {
-    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); fetchUsage(); fetchScheduler(); }, ms);
+    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); fetchUsage(); }, ms);
   }
 }
 
 $('interval').addEventListener('change', setupRefresh);
-$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); fetchUsage(); fetchScheduler(); });
+$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); fetchUsage(); });
 $('clearSessionsBtn').addEventListener('click', clearSessions);
 
 // Auto-delete mode
@@ -895,106 +854,25 @@ $('addAccountForm').addEventListener('submit', async e => {
 function renderAccounts(accounts) {
   const body = $('accountBody');
   if (!accounts || accounts.length === 0) {
-    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">无账号</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无账号</td></tr>';
     return;
   }
   body.innerHTML = accounts.map(a => {
-    const sch = a.scheduler || {};
-    const weight = sch.weight ?? 0;
-    const maxWeight = sch.maxWeight ?? 50;
-    const pct = Math.round((weight / maxWeight) * 100);
-    const barColor = sch.status === 'cooling' ? 'var(--red)' : sch.status === 'probation' ? 'var(--yellow)' : weight < 10 ? 'var(--yellow)' : 'var(--green)';
-
-    // Weight bar
-    const weightHtml = `<div style="display:flex;align-items:center;gap:4px">
-      <div style="width:50px;height:7px;background:var(--bg);border-radius:3px;overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
-      </div>
-      <span style="font-size:0.8em">${weight}/${maxWeight}</span>
-    </div>`;
-
-    // Status
-    let statusHtml;
-    if (sch.status === 'cooling') {
-      statusHtml = `<span style="color:var(--red)">冷却 ${sch.cooldownRemaining || 0}s</span>`;
-    } else if (sch.status === 'probation') {
-      statusHtml = `<span style="color:var(--yellow)">观察期 ${sch.probationProgress || ''}</span>`;
-    } else if (sch.status === 'warning') {
-      statusHtml = '<span style="color:var(--yellow)">低权重</span>';
-    } else if (a.dead) {
-      statusHtml = '<span style="color:var(--red)">不可用</span>';
-    } else {
-      statusHtml = '<span style="color:var(--green)">正常</span>';
-    }
-
-    const freqHtml = `${sch.recentRequests || 0}/${sch.rateLimit || 10}`;
-    const successFailHtml = `<span style="color:var(--green)">${sch.totalSuccess || 0}</span>/<span style="color:var(--red)">${sch.totalFailure || 0}</span>`;
-
-    // Action buttons
-    const tokenPrefix = a.token.replace('...', '');
-    let actions = `<button class="btn" style="background:var(--red);padding:2px 8px;font-size:0.78em" data-email="${a.email}">删除</button>`;
-    if (sch.status === 'cooling' || sch.status === 'probation') {
-      actions += ` <button class="btn" style="background:var(--yellow);color:#000;padding:2px 8px;font-size:0.78em" data-clear-cooldown="${tokenPrefix}">解冷却</button>`;
-    }
-    actions += ` <button class="btn" style="background:var(--border);padding:2px 8px;font-size:0.78em" data-reset-weight="${tokenPrefix}">重置</button>`;
-
+    const status = a.dead
+      ? '<span class="dot dot-red"></span>不可用'
+      : a.errorCount >= 1 ? '<span class="dot dot-yellow"></span>异常'
+      : '<span class="dot dot-green"></span>正常';
     return `<tr>
-      <td>${a.email}<div style="font-size:0.75em;color:var(--text-dim)">${a.token}${a.visionCapable === true ? ' · <span style="color:var(--green)">视觉</span>' : ''}</div></td>
-      <td>${weightHtml}</td>
-      <td>${statusHtml}</td>
-      <td>${freqHtml}</td>
-      <td>${successFailHtml}</td>
-      <td>${sch.dispatchCount || 0}</td>
-      <td style="white-space:nowrap">${actions}</td>
+      <td>${a.email}</td>
+      <td>${a.token}</td>
+      <td>${visionLabel(a.visionCapable)}</td>
+      <td>${a.errorCount}</td>
+      <td>${status}</td>
+      <td><button class="btn" style="background:var(--red);padding:3px 12px;font-size:0.8em" data-email="${a.email}">删除</button></td>
     </tr>`;
   }).join('');
-
-  // Bind event listeners
   body.querySelectorAll('button[data-email]').forEach(btn =>
     btn.addEventListener('click', () => removeAccount(btn.dataset.email)));
-  body.querySelectorAll('button[data-clear-cooldown]').forEach(btn =>
-    btn.addEventListener('click', () => clearAccountCooldown(btn.dataset.clearCooldown)));
-  body.querySelectorAll('button[data-reset-weight]').forEach(btn =>
-    btn.addEventListener('click', () => resetAccountWeight(btn.dataset.resetWeight)));
-}
-
-async function clearAccountCooldown(tokenPrefix) {
-  try {
-    const res = await apiFetch('/admin/api/account/clear-cooldown', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: tokenPrefix }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchAccounts();
-      fetchScheduler();
-    } else {
-      alert(data.message || '操作失败');
-    }
-  } catch (e) {
-    if (e.message !== 'unauthorized') alert('请求失败');
-  }
-}
-
-async function resetAccountWeight(tokenPrefix) {
-  if (!confirm('确认重置该账号的调度权重？')) return;
-  try {
-    const res = await apiFetch('/admin/api/account/reset-weight', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: tokenPrefix }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchAccounts();
-      fetchScheduler();
-    } else {
-      alert(data.message || '操作失败');
-    }
-  } catch (e) {
-    if (e.message !== 'unauthorized') alert('请求失败');
-  }
 }
 
 async function fetchAccounts() {
@@ -1162,149 +1040,6 @@ $('passwordForm').addEventListener('submit', async e => {
   } catch (err) {
     msgEl.className = 'msg msg-err';
     msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
-  }
-});
-
-// ---- Smart Scheduler ----
-function failureTypeLabel(type) {
-  const map = { '429': '限流', 'waf': 'WAF', 'token_invalid': 'Token失效', 'banned': '封禁', 'server_error': '服务端', 'generic': '其他' };
-  return map[type] || type || '-';
-}
-
-function statusBadge(status, extra) {
-  switch (status) {
-    case 'cooling': return `<span style="color:var(--red)">冷却中 ${extra || ''}</span>`;
-    case 'probation': return `<span style="color:var(--yellow)">观察期 ${extra || ''}</span>`;
-    case 'warning': return '<span style="color:var(--yellow)">低权重</span>';
-    default: return '<span style="color:var(--green)">正常</span>';
-  }
-}
-
-async function fetchScheduler() {
-  try {
-    const res = await apiFetch('/admin/api/scheduler');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!data.success) return;
-
-    const cfg = data.config;
-    $('schMinInterval').textContent = (cfg.MIN_INTERVAL / 1000).toFixed(1) + 's';
-    $('schRateLimit').textContent = cfg.RATE_LIMIT + '/' + (cfg.RATE_WINDOW / 1000) + 's';
-    $('schCooldown').textContent = (cfg.COOLDOWN_DURATION / 1000) + 's';
-    $('schProbation').textContent = cfg.PROBATION_SUCCESS_REQUIRED + '次成功';
-
-    // Global status indicator
-    const g = data.global;
-    const env = data.environment;
-    let globalHtml = '';
-    if (g.slowdownActive) {
-      globalHtml += `<span style="color:var(--red);font-weight:600">⚠️ 全局降速中</span> (剩余 ${g.slowdownRemaining}s) `;
-    }
-    if (env.isNightMode) {
-      globalHtml += `<span style="color:var(--yellow)">🌙 深夜模式</span> (${env.nightHours}) `;
-    }
-    if (!g.slowdownActive && !env.isNightMode) {
-      globalHtml += `<span style="color:var(--green)">✓ 正常运行</span> `;
-    }
-    globalHtml += `<span style="color:var(--text-dim);margin-left:12px">窗口失败: ${g.recentFailureCount}/${g.failThreshold}</span>`;
-    $('schGlobalStatus').innerHTML = globalHtml;
-
-    const body = $('schBody');
-    if (!data.entries || data.entries.length === 0) {
-      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim)">暂无调度数据（首次请求后出现）</td></tr>';
-      return;
-    }
-
-    body.innerHTML = data.entries.map(e => {
-      const pct = Math.round((e.weight / e.maxWeight) * 100);
-      const barColor = e.status === 'cooling' ? 'var(--red)' : e.status === 'probation' ? 'var(--yellow)' : e.weight < 10 ? 'var(--yellow)' : 'var(--green)';
-      const statusExtra = e.status === 'cooling' ? `${e.cooldownRemaining}s` : e.status === 'probation' ? e.probationProgress : '';
-      return `<tr>
-        <td>${e.token}</td>
-        <td>
-          <div style="display:flex;align-items:center;gap:6px">
-            <div style="width:60px;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
-              <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px"></div>
-            </div>
-            <span style="font-size:0.85em">${e.weight}/${e.maxWeight}</span>
-          </div>
-        </td>
-        <td>${statusBadge(e.status, statusExtra)}</td>
-        <td>${e.dispatchCount}</td>
-        <td>${e.recentRequests}/${e.rateLimit}</td>
-        <td><span style="color:var(--green)">${e.totalSuccess}</span>/<span style="color:var(--red)">${e.totalFailure}</span></td>
-        <td style="font-size:0.8em">${e.lastFailureType ? failureTypeLabel(e.lastFailureType) : '-'}</td>
-        <td><button class="btn" style="background:var(--border);padding:3px 10px;font-size:0.8em" data-sch-token="${e.token.replace('...', '')}">重置</button></td>
-      </tr>`;
-    }).join('');
-
-    body.querySelectorAll('button[data-sch-token]').forEach(btn =>
-      btn.addEventListener('click', () => resetSchToken(btn.dataset.schToken)));
-  } catch (e) {
-    if (e.message !== 'unauthorized') console.error('fetchScheduler error:', e);
-  }
-}
-
-async function resetSchToken(tokenPrefix) {
-  if (!confirm('确认重置令牌 ' + tokenPrefix + '... 的调度权重？')) return;
-  try {
-    const res = await apiFetch('/admin/api/scheduler/reset/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: tokenPrefix }),
-    });
-    const data = await res.json();
-    if (data.success) fetchScheduler();
-    else alert(data.message || '重置失败');
-  } catch (e) {
-    if (e.message !== 'unauthorized') alert('请求失败');
-  }
-}
-
-$('schResetAllBtn').addEventListener('click', async () => {
-  if (!confirm('确认重置所有调度状态？所有权重将恢复初始值。')) return;
-  try {
-    const res = await apiFetch('/admin/api/scheduler/reset', { method: 'POST' });
-    const data = await res.json();
-    if (data.success) fetchScheduler();
-    else alert(data.message || '重置失败');
-  } catch (e) {
-    if (e.message !== 'unauthorized') alert('请求失败');
-  }
-});
-
-$('schConfigBtn').addEventListener('click', async () => {
-  try {
-    const res = await apiFetch('/admin/api/scheduler/config');
-    const data = await res.json();
-    if (!data.success) return;
-    const cfg = data.config;
-    const input = prompt(
-      '调度器参数（JSON 格式，仅修改需要的字段）：\n\n' +
-      '当前配置:\n' +
-      `  成功+${cfg.SUCCESS_INCREMENT} / 失败-${cfg.FAILURE_DECREMENT}\n` +
-      `  最大权重=${cfg.MAX_WEIGHT}, 冷却阈值=${cfg.COOLDOWN_THRESHOLD}\n` +
-      `  冷却时长=${cfg.COOLDOWN_DURATION/1000}s, 恢复权重=${cfg.COOLDOWN_RECOVERY_WEIGHT}\n` +
-      `  最小间隔=${cfg.MIN_INTERVAL}ms, 抖动=${cfg.MAX_JITTER}ms\n` +
-      `  频率限制=${cfg.RATE_LIMIT}次/${cfg.RATE_WINDOW/1000}s\n` +
-      `  调度差值=${cfg.MAX_DISPATCH_DIFF}\n\n` +
-      '示例: {"MIN_INTERVAL":5000,"RATE_LIMIT":8}',
-      JSON.stringify({ MIN_INTERVAL: cfg.MIN_INTERVAL, RATE_LIMIT: cfg.RATE_LIMIT })
-    );
-    if (!input) return;
-    const updates = JSON.parse(input);
-    const saveRes = await apiFetch('/admin/api/scheduler/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-    const saveData = await saveRes.json();
-    if (saveData.success) {
-      alert('配置已更新（' + saveData.changed + ' 个参数）');
-      fetchScheduler();
-    }
-  } catch (e) {
-    if (e.message !== 'unauthorized') alert('操作失败: ' + e.message);
   }
 });
 
@@ -1549,7 +1284,6 @@ function startPanel() {
   loadApiKeys();
   fetchProxyConfig();
   fetchUsage();
-  fetchScheduler();
 }
 
 async function boot() {

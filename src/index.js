@@ -84,6 +84,9 @@ app.get('/performance', (req, res) => {
 app.get('/playground', (req, res) => {
   res.sendFile(join(__dirname, 'playground', 'index.html'));
 });
+app.get('/scheduler', (req, res) => {
+  res.sendFile(join(__dirname, 'scheduler', 'index.html'));
+});
 
 // Playground: get default API key for auto-fill (no auth — same-origin only)
 app.get('/playground/api/default-key', (req, res) => {
