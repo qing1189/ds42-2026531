@@ -76,6 +76,9 @@ app.get('/admin', (req, res) => {
 app.get('/performance', (req, res) => {
   res.sendFile(join(__dirname, 'performance', 'index.html'));
 });
+app.get('/playground', (req, res) => {
+  res.sendFile(join(__dirname, 'playground', 'index.html'));
+});
 
 // ---- Public panel endpoints (must be registered BEFORE the panelAuth guard)
 app.get('/admin/api/config', (req, res) => {
