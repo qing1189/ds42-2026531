@@ -540,6 +540,76 @@ export function resetAllSchedulerState() {
   return { success: true, message: '所有调度状态已重置' };
 }
 
+/**
+ * 获取单个 token 的调度器信息（用于账号管理视图）
+ * @param {string} token - 完整 token 或前缀
+ */
+export function getTokenSchedulerInfo(token) {
+  const now = Date.now();
+  
+  // 精确匹配或前缀匹配
+  let entry = schedulerState.get(token);
+  if (!entry) {
+    for (const [key, val] of schedulerState) {
+      if (key.startsWith(token) || token.startsWith(key.slice(0, 12))) {
+        entry = val;
+        break;
+      }
+    }
+  }
+  
+  if (!entry) return null;
+  
+  checkCooldown(entry);
+  pruneRequestTimes(entry);
+  
+  let status = 'normal';
+  if (entry.cooling) status = 'cooling';
+  else if (entry.probation) status = 'probation';
+  else if (entry.weight < CONFIG.COOLDOWN_THRESHOLD) status = 'warning';
+  
+  return {
+    weight: entry.weight,
+    maxWeight: CONFIG.MAX_WEIGHT,
+    status,
+    cooling: entry.cooling,
+    cooldownRemaining: entry.cooling ? Math.max(0, Math.ceil((entry.cooldownUntil - now) / 1000)) : 0,
+    probation: entry.probation,
+    probationProgress: entry.probation ? `${entry.probationSuccessCount}/${CONFIG.PROBATION_SUCCESS_REQUIRED}` : null,
+    consecutiveCooldowns: Math.floor(entry.consecutiveCooldowns),
+    dispatchCount: entry.dispatchCount,
+    recentRequests: entry.requestTimes.length,
+    rateLimit: getEffectiveRateLimit(entry),
+    totalSuccess: entry.totalSuccess,
+    totalFailure: entry.totalFailure,
+    lastFailureType: entry.lastFailureType,
+  };
+}
+
+/**
+ * 清除单个 token 的冷却状态（手动解除冷却）
+ */
+export function clearTokenCooldown(token) {
+  for (const [key, val] of schedulerState) {
+    if (key === token || key.startsWith(token) || token.startsWith(key.slice(0, 12))) {
+      if (!val.cooling && !val.probation) {
+        return { success: false, message: '该 Token 当前不在冷却/观察期中' };
+      }
+      val.cooling = false;
+      val.cooldownUntil = 0;
+      val.probation = false;
+      val.probationSuccessCount = 0;
+      // 恢复到冷却恢复权重，但不重置连续冷却计数
+      if (val.weight < CONFIG.COOLDOWN_RECOVERY_WEIGHT) {
+        val.weight = CONFIG.COOLDOWN_RECOVERY_WEIGHT;
+      }
+      console.log(`[Scheduler] Cooldown manually cleared for token ${token.slice(0, 12)}...`);
+      return { success: true, message: '冷却已清除，权重已恢复' };
+    }
+  }
+  return { success: false, message: 'Token 未在调度器中' };
+}
+
 export function cleanupToken(token) {
   schedulerState.delete(token);
 }

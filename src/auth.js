@@ -99,7 +99,7 @@ for (const acct of accounts) {
 
 import { loginHeaders, getHeaders, getDeviceId, proxiedFetch, getDeviceIdForToken } from './headers.js';
 import { loginProxiedFetch } from './proxy.js';
-import { selectToken, recordDispatch, recordSuccess, recordFailure, FAILURE_TYPE } from './scheduler.js';
+import { selectToken, recordDispatch, recordSuccess, recordFailure, FAILURE_TYPE, getTokenSchedulerInfo } from './scheduler.js';
 
 async function login(account, password) {
   // Use a fresh deviceId for login — real browser gets it from portal101.cn device fingerprint
@@ -467,15 +467,20 @@ export async function addAccountToPool(account, password) {
 export function listAccounts() {
   return tokenPool
     .filter(t => t.email)
-    .map(t => ({
-      email: t.email,
-      token: t.token ? t.token.slice(0, 12) + '...' : 'NONE',
-      visionCapable: t.visionCapable,
-      errorCount: t.errorCount,
-      activeRequests: t.activeRequests,
-      dead: t.dead,
-      maxConcurrent: MAX_CONCURRENT_PER_TOKEN,
-    }));
+    .map(t => {
+      const schedulerInfo = t.token ? getTokenSchedulerInfo(t.token) : null;
+      return {
+        email: t.email,
+        token: t.token ? t.token.slice(0, 12) + '...' : 'NONE',
+        fullToken: t.token || null, // 用于前端操作（清除冷却/重置权重）
+        visionCapable: t.visionCapable,
+        errorCount: t.errorCount,
+        activeRequests: t.activeRequests,
+        dead: t.dead,
+        maxConcurrent: MAX_CONCURRENT_PER_TOKEN,
+        scheduler: schedulerInfo,
+      };
+    });
 }
 
 // Remove an account (and its token) from the pool (hot-reload).

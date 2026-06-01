@@ -11,7 +11,7 @@ import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChat
 import { getMetrics, getTimeseries } from './metrics.js';
 import { getProxyConfig, setManualProxy, setXiequApiUrl, fetchXiequProxy, checkProxy, restoreProxyConfig } from './proxy.js';
 import { getAllUsageStats, resetAllUsage, resetApiKeyUsage, resetAccountUsage } from './usage.js';
-import { getSchedulerStatus, getSchedulerConfig, updateSchedulerConfig, resetTokenWeight, resetAllSchedulerState } from './scheduler.js';
+import { getSchedulerStatus, getSchedulerConfig, updateSchedulerConfig, resetTokenWeight, resetAllSchedulerState, clearTokenCooldown } from './scheduler.js';
 import { getFingerprintConfig, setFingerprintConfig, getFingerprintStatus, rotateFingerprint } from './headers.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
@@ -209,6 +209,28 @@ app.post('/admin/api/account/remove', (req, res) => {
     return res.status(400).json({ error: { message: 'email/phone required' } });
   }
   const result = removeAccountFromPool(email);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+// Clear cooldown for a specific token (by token prefix)
+app.post('/admin/api/account/clear-cooldown', (req, res) => {
+  const { token } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ error: { message: 'token required' } });
+  }
+  const result = clearTokenCooldown(token);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+// Reset weight for a specific token (by token prefix)
+app.post('/admin/api/account/reset-weight', (req, res) => {
+  const { token } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ error: { message: 'token required' } });
+  }
+  const result = resetTokenWeight(token);
   if (result.success) res.json(result);
   else res.status(400).json(result);
 });

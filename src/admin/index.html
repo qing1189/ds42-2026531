@@ -405,9 +405,9 @@ footer {
     <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">支持 <strong>邮箱或手机号</strong> 登录；添加 / 删除立即生效（热加载）。删除账号会一并移除其令牌。</p>
     <div style="overflow-x:auto;margin-bottom:16px">
       <table>
-        <thead><tr><th>账号</th><th>令牌</th><th>视觉</th><th>错误</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>账号</th><th>令牌</th><th>权重</th><th>调度状态</th><th>频率</th><th>成功/失败</th><th>操作</th></tr></thead>
         <tbody id="accountBody">
-          <tr><td colspan="6" class="loading">加载中...</td></tr>
+          <tr><td colspan="7" class="loading">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -895,25 +895,112 @@ $('addAccountForm').addEventListener('submit', async e => {
 function renderAccounts(accounts) {
   const body = $('accountBody');
   if (!accounts || accounts.length === 0) {
-    body.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无账号</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">无账号</td></tr>';
     return;
   }
   body.innerHTML = accounts.map(a => {
-    const status = a.dead
-      ? '<span class="dot dot-red"></span>不可用'
-      : a.errorCount >= 1 ? '<span class="dot dot-yellow"></span>异常'
-      : '<span class="dot dot-green"></span>正常';
+    const sch = a.scheduler;
+    // Weight bar
+    let weightHtml = '<span style="color:var(--text-dim)">-</span>';
+    let statusHtml = '';
+    let freqHtml = '-';
+    let successFailHtml = '-';
+    if (sch) {
+      const pct = Math.round((sch.weight / sch.maxWeight) * 100);
+      const barColor = sch.status === 'cooling' ? 'var(--red)' : sch.status === 'probation' ? 'var(--yellow)' : sch.weight < 10 ? 'var(--yellow)' : 'var(--green)';
+      weightHtml = `<div style="display:flex;align-items:center;gap:4px">
+        <div style="width:50px;height:7px;background:var(--bg);border-radius:3px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
+        </div>
+        <span style="font-size:0.8em">${sch.weight}/${sch.maxWeight}</span>
+      </div>`;
+
+      // Status
+      if (sch.status === 'cooling') {
+        statusHtml = `<span style="color:var(--red)">冷却 ${sch.cooldownRemaining}s</span>`;
+      } else if (sch.status === 'probation') {
+        statusHtml = `<span style="color:var(--yellow)">观察期 ${sch.probationProgress}</span>`;
+      } else if (sch.status === 'warning') {
+        statusHtml = '<span style="color:var(--yellow)">低权重</span>';
+      } else if (a.dead) {
+        statusHtml = '<span style="color:var(--red)">不可用</span>';
+      } else {
+        statusHtml = '<span style="color:var(--green)">正常</span>';
+      }
+
+      freqHtml = `${sch.recentRequests}/${sch.rateLimit}`;
+      successFailHtml = `<span style="color:var(--green)">${sch.totalSuccess}</span>/<span style="color:var(--red)">${sch.totalFailure}</span>`;
+    } else {
+      statusHtml = a.dead ? '<span style="color:var(--red)">不可用</span>' : '<span style="color:var(--green)">正常</span>';
+    }
+
+    // Action buttons
+    const tokenPrefix = a.token.replace('...', '');
+    let actions = `<button class="btn" style="background:var(--red);padding:2px 8px;font-size:0.78em" data-email="${a.email}">删除</button>`;
+    if (sch && (sch.status === 'cooling' || sch.status === 'probation')) {
+      actions += ` <button class="btn" style="background:var(--yellow);color:#000;padding:2px 8px;font-size:0.78em" data-clear-cooldown="${tokenPrefix}">解冷却</button>`;
+    }
+    if (sch) {
+      actions += ` <button class="btn" style="background:var(--border);padding:2px 8px;font-size:0.78em" data-reset-weight="${tokenPrefix}">重置权重</button>`;
+    }
+
     return `<tr>
-      <td>${a.email}</td>
-      <td>${a.token}</td>
+      <td>${a.email}<div style="font-size:0.75em;color:var(--text-dim)">${a.token}</div></td>
       <td>${visionLabel(a.visionCapable)}</td>
-      <td>${a.errorCount}</td>
-      <td>${status}</td>
-      <td><button class="btn" style="background:var(--red);padding:3px 12px;font-size:0.8em" data-email="${a.email}">删除</button></td>
+      <td>${weightHtml}</td>
+      <td>${statusHtml}</td>
+      <td>${freqHtml}</td>
+      <td>${successFailHtml}</td>
+      <td style="white-space:nowrap">${actions}</td>
     </tr>`;
   }).join('');
+
+  // Bind event listeners
   body.querySelectorAll('button[data-email]').forEach(btn =>
     btn.addEventListener('click', () => removeAccount(btn.dataset.email)));
+  body.querySelectorAll('button[data-clear-cooldown]').forEach(btn =>
+    btn.addEventListener('click', () => clearAccountCooldown(btn.dataset.clearCooldown)));
+  body.querySelectorAll('button[data-reset-weight]').forEach(btn =>
+    btn.addEventListener('click', () => resetAccountWeight(btn.dataset.resetWeight)));
+}
+
+async function clearAccountCooldown(tokenPrefix) {
+  try {
+    const res = await apiFetch('/admin/api/account/clear-cooldown', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenPrefix }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      fetchAccounts();
+      fetchScheduler();
+    } else {
+      alert(data.message || '操作失败');
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+async function resetAccountWeight(tokenPrefix) {
+  if (!confirm('确认重置该账号的调度权重？')) return;
+  try {
+    const res = await apiFetch('/admin/api/account/reset-weight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenPrefix }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      fetchAccounts();
+      fetchScheduler();
+    } else {
+      alert(data.message || '操作失败');
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
 }
 
 async function fetchAccounts() {
