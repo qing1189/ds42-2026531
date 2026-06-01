@@ -1,4 +1,4 @@
-# deepseek-2api
+# deepseek-网关
 
 把 **DeepSeek 网页版聊天** 反向封装成标准 API 的代理服务。对外同时提供 **OpenAI 兼容格式** 和 **DeepSeek 原生格式** 两套接口，可直接接入 Claude Code、OpenAI SDK、各类 LLM 客户端 / 网关（如 one-api / new-api）。
 
