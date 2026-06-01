@@ -1,4 +1,5 @@
 import { setRequestToken, reportTokenError, reportTokenSuccess } from './auth.js';
+import { FAILURE_TYPE } from './scheduler.js';
 import { solvePowChallengeWithToken } from './pow.js';
 import { getSession } from './session.js';
 import { streamHeaders, proxiedFetch } from './headers.js';
@@ -49,12 +50,12 @@ export async function completion({ modelType, prompt, thinkingEnabled = false, s
         const code = errJson.code;
         // 40003 = invalid/expired token
         if (code === 40003) {
-          reportTokenError(slot.token);
+          reportTokenError(slot.token, FAILURE_TYPE.TOKEN_INVALID);
           throw new Error('Token invalid (40003)');
         }
         // 40004 = account banned
         if (code === 40004) {
-          reportTokenError(slot.token);
+          reportTokenError(slot.token, FAILURE_TYPE.ACCOUNT_BANNED);
           const entry = (await import('./auth.js')).getPoolInfo().find(t => slot.token.startsWith(t.token.replace('...', '')));
           console.error(`Account BANNED during completion: ${entry?.email || slot.token.slice(0, 12)}...`);
           throw new Error('Account banned (40004)');
@@ -62,6 +63,22 @@ export async function completion({ modelType, prompt, thinkingEnabled = false, s
       } catch (parseErr) {
         if (parseErr.message.includes('Token invalid') || parseErr.message.includes('Account banned')) throw parseErr;
       }
+
+      // HTTP status-based failure classification
+      if (res.status === 429) {
+        reportTokenError(slot.token, FAILURE_TYPE.RATE_LIMIT);
+        throw new Error(`Rate limited (429): ${text.slice(0, 200)}`);
+      }
+      if (res.status === 202 || res.status === 403) {
+        reportTokenError(slot.token, FAILURE_TYPE.WAF);
+        throw new Error(`WAF/Forbidden (${res.status}): ${text.slice(0, 200)}`);
+      }
+      if (res.status === 502 || res.status === 503) {
+        reportTokenError(slot.token, FAILURE_TYPE.SERVER_ERROR);
+        throw new Error(`Server error (${res.status}): ${text.slice(0, 200)}`);
+      }
+
+      reportTokenError(slot.token, FAILURE_TYPE.GENERIC);
       throw new Error(`Completion request failed: ${res.status} ${text}`);
     }
 

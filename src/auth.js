@@ -99,7 +99,7 @@ for (const acct of accounts) {
 
 import { loginHeaders, getHeaders, getDeviceId, proxiedFetch, getDeviceIdForToken } from './headers.js';
 import { loginProxiedFetch } from './proxy.js';
-import { selectToken, recordDispatch, recordSuccess, recordFailure } from './scheduler.js';
+import { selectToken, recordDispatch, recordSuccess, recordFailure, FAILURE_TYPE } from './scheduler.js';
 
 async function login(account, password) {
   // Use a fresh deviceId for login — real browser gets it from portal101.cn device fingerprint
@@ -313,13 +313,18 @@ export function acquireToken(preferVision = false) {
   return { token: chosen.token, account: chosen, release, waitMs: selection?.waitMs || 0 };
 }
 
-export function reportTokenError(token) {
+export function reportTokenError(token, failureType = FAILURE_TYPE.GENERIC) {
   const entry = tokenPool.find(t => t.token === token);
   if (!entry) return;
   entry.errorCount++;
 
-  // Report to smart scheduler
-  recordFailure(token);
+  // Report to smart scheduler with failure type
+  recordFailure(token, failureType);
+
+  // On WAF/403 errors, rotate fingerprint to avoid detection
+  if (failureType === FAILURE_TYPE.WAF) {
+    import('./headers.js').then(m => m.rotateFingerprint(token)).catch(() => {});
+  }
 
   if (entry.errorCount >= TOKEN_DEAD_THRESHOLD) {
     entry.dead = true;

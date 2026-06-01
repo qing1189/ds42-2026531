@@ -499,8 +499,14 @@ footer {
 
   <!-- 智能调度 -->
   <div class="card">
-    <h2>智能调度</h2>
-    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">权重调度 + 冷却保护 + 请求间隔抖动 — 降低风控触发概率</p>
+    <h2>智能调度 v2</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">权重调度 + 失败分类 + 渐进恢复 + 时间段策略 + 全局自适应 — 多层风控防护</p>
+
+    <!-- 全局状态指示器 -->
+    <div id="schGlobalStatus" style="margin-bottom:12px;padding:10px 14px;background:var(--bg);border-radius:6px;border:1px solid var(--border);font-size:0.88em">
+      加载中...
+    </div>
+
     <div class="stats-grid" style="margin-bottom:12px">
       <div class="stat-item">
         <div class="label">最小间隔</div>
@@ -515,8 +521,8 @@ footer {
         <div class="value" id="schCooldown">-</div>
       </div>
       <div class="stat-item">
-        <div class="label">冷却阈值</div>
-        <div class="value" id="schThreshold">-</div>
+        <div class="label">观察期要求</div>
+        <div class="value" id="schProbation">-</div>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
@@ -525,9 +531,9 @@ footer {
     </div>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>令牌</th><th>权重</th><th>状态</th><th>调度次</th><th>近1分钟</th><th>成功/失败</th><th>操作</th></tr></thead>
+        <thead><tr><th>令牌</th><th>权重</th><th>状态</th><th>调度次</th><th>频率</th><th>成功/失败</th><th>最近错误</th><th>操作</th></tr></thead>
         <tbody id="schBody">
-          <tr><td colspan="7" style="color:var(--text-dim)">无数据</td></tr>
+          <tr><td colspan="8" style="color:var(--text-dim)">无数据</td></tr>
         </tbody>
       </table>
     </div>
@@ -1079,6 +1085,20 @@ $('passwordForm').addEventListener('submit', async e => {
 });
 
 // ---- Smart Scheduler ----
+function failureTypeLabel(type) {
+  const map = { '429': '限流', 'waf': 'WAF', 'token_invalid': 'Token失效', 'banned': '封禁', 'server_error': '服务端', 'generic': '其他' };
+  return map[type] || type || '-';
+}
+
+function statusBadge(status, extra) {
+  switch (status) {
+    case 'cooling': return `<span style="color:var(--red)">冷却中 ${extra || ''}</span>`;
+    case 'probation': return `<span style="color:var(--yellow)">观察期 ${extra || ''}</span>`;
+    case 'warning': return '<span style="color:var(--yellow)">低权重</span>';
+    default: return '<span style="color:var(--green)">正常</span>';
+  }
+}
+
 async function fetchScheduler() {
   try {
     const res = await apiFetch('/admin/api/scheduler');
@@ -1090,25 +1110,34 @@ async function fetchScheduler() {
     $('schMinInterval').textContent = (cfg.MIN_INTERVAL / 1000).toFixed(1) + 's';
     $('schRateLimit').textContent = cfg.RATE_LIMIT + '/' + (cfg.RATE_WINDOW / 1000) + 's';
     $('schCooldown').textContent = (cfg.COOLDOWN_DURATION / 1000) + 's';
-    $('schThreshold').textContent = '<' + cfg.COOLDOWN_THRESHOLD;
+    $('schProbation').textContent = cfg.PROBATION_SUCCESS_REQUIRED + '次成功';
+
+    // Global status indicator
+    const g = data.global;
+    const env = data.environment;
+    let globalHtml = '';
+    if (g.slowdownActive) {
+      globalHtml += `<span style="color:var(--red);font-weight:600">⚠️ 全局降速中</span> (剩余 ${g.slowdownRemaining}s) `;
+    }
+    if (env.isNightMode) {
+      globalHtml += `<span style="color:var(--yellow)">🌙 深夜模式</span> (${env.nightHours}) `;
+    }
+    if (!g.slowdownActive && !env.isNightMode) {
+      globalHtml += `<span style="color:var(--green)">✓ 正常运行</span> `;
+    }
+    globalHtml += `<span style="color:var(--text-dim);margin-left:12px">窗口失败: ${g.recentFailureCount}/${g.failThreshold}</span>`;
+    $('schGlobalStatus').innerHTML = globalHtml;
 
     const body = $('schBody');
     if (!data.entries || data.entries.length === 0) {
-      body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">暂无调度数据（首次请求后出现）</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim)">暂无调度数据（首次请求后出现）</td></tr>';
       return;
     }
 
     body.innerHTML = data.entries.map(e => {
       const pct = Math.round((e.weight / e.maxWeight) * 100);
-      const barColor = e.cooling ? 'var(--red)' : e.weight < cfg.COOLDOWN_THRESHOLD ? 'var(--yellow)' : 'var(--green)';
-      let status;
-      if (e.cooling) {
-        status = `<span style="color:var(--red)">冷却 ${e.cooldownRemaining}s</span>`;
-      } else if (e.weight < cfg.COOLDOWN_THRESHOLD) {
-        status = '<span style="color:var(--yellow)">低权重</span>';
-      } else {
-        status = '<span style="color:var(--green)">正常</span>';
-      }
+      const barColor = e.status === 'cooling' ? 'var(--red)' : e.status === 'probation' ? 'var(--yellow)' : e.weight < 10 ? 'var(--yellow)' : 'var(--green)';
+      const statusExtra = e.status === 'cooling' ? `${e.cooldownRemaining}s` : e.status === 'probation' ? e.probationProgress : '';
       return `<tr>
         <td>${e.token}</td>
         <td>
@@ -1119,10 +1148,11 @@ async function fetchScheduler() {
             <span style="font-size:0.85em">${e.weight}/${e.maxWeight}</span>
           </div>
         </td>
-        <td>${status}</td>
+        <td>${statusBadge(e.status, statusExtra)}</td>
         <td>${e.dispatchCount}</td>
         <td>${e.recentRequests}/${e.rateLimit}</td>
-        <td><span style="color:var(--green)">${e.totalSuccess}</span> / <span style="color:var(--red)">${e.totalFailure}</span></td>
+        <td><span style="color:var(--green)">${e.totalSuccess}</span>/<span style="color:var(--red)">${e.totalFailure}</span></td>
+        <td style="font-size:0.8em">${e.lastFailureType ? failureTypeLabel(e.lastFailureType) : '-'}</td>
         <td><button class="btn" style="background:var(--border);padding:3px 10px;font-size:0.8em" data-sch-token="${e.token.replace('...', '')}">重置</button></td>
       </tr>`;
     }).join('');

@@ -12,6 +12,7 @@ import { getMetrics, getTimeseries } from './metrics.js';
 import { getProxyConfig, setManualProxy, setXiequApiUrl, fetchXiequProxy, checkProxy, restoreProxyConfig } from './proxy.js';
 import { getAllUsageStats, resetAllUsage, resetApiKeyUsage, resetAccountUsage } from './usage.js';
 import { getSchedulerStatus, getSchedulerConfig, updateSchedulerConfig, resetTokenWeight, resetAllSchedulerState } from './scheduler.js';
+import { getFingerprintConfig, setFingerprintConfig, getFingerprintStatus, rotateFingerprint } from './headers.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
@@ -308,6 +309,26 @@ app.post('/admin/api/scheduler/reset/token', (req, res) => {
   const result = resetTokenWeight(token);
   if (result.success) res.json(result);
   else res.status(400).json(result);
+});
+
+// --- Fingerprint rotation (指纹轮换) ---
+app.get('/admin/api/fingerprint', (req, res) => {
+  res.json({ success: true, config: getFingerprintConfig(), entries: getFingerprintStatus() });
+});
+
+app.post('/admin/api/fingerprint/config', (req, res) => {
+  const updates = req.body || {};
+  const result = setFingerprintConfig(updates);
+  res.json({ success: true, config: result });
+});
+
+app.post('/admin/api/fingerprint/rotate', (req, res) => {
+  const { token } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ error: { message: 'token required' } });
+  }
+  rotateFingerprint(token);
+  res.json({ success: true, message: '指纹已轮换' });
 });
 
 // --- Session cache management (hot-reload) ---

@@ -17,8 +17,17 @@ const BROWSER_HEADERS = {
   'x-client-timezone-offset': '28800',
 };
 
-// Per-token cookie jar: smidV2, HWWAFSESTIME, HWWAFSESID, ds_session_id, thumbcache
+// Per-token cookie jar with fingerprint rotation
+// tokenCookies stores: { cookie, deviceId, createdAt, requestCount }
 const tokenCookies = new Map();
+
+// Fingerprint rotation config
+const FINGERPRINT_CONFIG = {
+  // Rotate fingerprint after this many requests per token
+  ROTATE_AFTER_REQUESTS: 50,
+  // Or rotate after this duration (ms) — 30 minutes
+  ROTATE_AFTER_MS: 30 * 60 * 1000,
+};
 
 function randomHex(len) {
   const chars = '0123456789abcdef';
@@ -34,8 +43,14 @@ function randomAlphaNum(len) {
   return s;
 }
 
-function ensureCookies(token) {
-  if (tokenCookies.has(token)) return tokenCookies.get(token);
+// Generate deviceId from fp-it-acc.portal101.cn format (base64-like)
+function generateDeviceId() {
+  const bytes = new Uint8Array(48);
+  for (let i = 0; i < 48; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Buffer.from(bytes).toString('base64').replace(/=/g, '') + '==';
+}
+
+function generateFingerprint() {
   const smidV2 = `20260520${randomAlphaNum(10)}${randomHex(24)}`;
   const HWWAFSESTIME = `${Date.now()}`;
   const HWWAFSESID = `${randomAlphaNum(4)}${randomHex(12)}`;
@@ -44,15 +59,77 @@ function ensureCookies(token) {
   const deviceId = generateDeviceId();
   const thumbcacheValue = deviceId;
   const cookie = `smidV2=${smidV2}; HWWAFSESTIME=${HWWAFSESTIME}; HWWAFSESID=${HWWAFSESID}; ds_session_id=${dsSessionId}; .thumbcache_${thumbcacheKey}=${encodeURIComponent(thumbcacheValue)}`;
-  tokenCookies.set(token, { cookie, deviceId });
-  return tokenCookies.get(token);
+  return { cookie, deviceId, createdAt: Date.now(), requestCount: 0 };
 }
 
-// Generate deviceId from fp-it-acc.portal101.cn format (base64-like)
-function generateDeviceId() {
-  const bytes = new Uint8Array(48);
-  for (let i = 0; i < 48; i++) bytes[i] = Math.floor(Math.random() * 256);
-  return Buffer.from(bytes).toString('base64').replace(/=/g, '') + '==';
+function shouldRotateFingerprint(entry) {
+  if (!entry) return true;
+  const age = Date.now() - entry.createdAt;
+  if (age >= FINGERPRINT_CONFIG.ROTATE_AFTER_MS) return true;
+  if (entry.requestCount >= FINGERPRINT_CONFIG.ROTATE_AFTER_REQUESTS) return true;
+  return false;
+}
+
+function ensureCookies(token) {
+  let entry = tokenCookies.get(token);
+  if (!entry || shouldRotateFingerprint(entry)) {
+    const isRotation = !!entry;
+    entry = generateFingerprint();
+    tokenCookies.set(token, entry);
+    if (isRotation) {
+      console.log(`[Fingerprint] Rotated fingerprint for token ${token.slice(0, 12)}...`);
+    }
+  }
+  entry.requestCount++;
+  return entry;
+}
+
+/**
+ * Force rotate fingerprint for a specific token (e.g. after WAF detection)
+ */
+export function rotateFingerprint(token) {
+  const entry = generateFingerprint();
+  tokenCookies.set(token, entry);
+  console.log(`[Fingerprint] Force rotated for token ${token.slice(0, 12)}...`);
+  return true;
+}
+
+/**
+ * Get fingerprint rotation config (for admin panel)
+ */
+export function getFingerprintConfig() {
+  return { ...FINGERPRINT_CONFIG };
+}
+
+/**
+ * Update fingerprint rotation config
+ */
+export function setFingerprintConfig(updates) {
+  if (typeof updates.ROTATE_AFTER_REQUESTS === 'number' && updates.ROTATE_AFTER_REQUESTS > 0) {
+    FINGERPRINT_CONFIG.ROTATE_AFTER_REQUESTS = updates.ROTATE_AFTER_REQUESTS;
+  }
+  if (typeof updates.ROTATE_AFTER_MS === 'number' && updates.ROTATE_AFTER_MS > 0) {
+    FINGERPRINT_CONFIG.ROTATE_AFTER_MS = updates.ROTATE_AFTER_MS;
+  }
+  return { ...FINGERPRINT_CONFIG };
+}
+
+/**
+ * Get fingerprint status for all tokens (for admin panel)
+ */
+export function getFingerprintStatus() {
+  const now = Date.now();
+  const entries = [];
+  for (const [token, entry] of tokenCookies) {
+    entries.push({
+      token: token.slice(0, 12) + '...',
+      requestCount: entry.requestCount,
+      ageSeconds: Math.floor((now - entry.createdAt) / 1000),
+      rotateAfterRequests: FINGERPRINT_CONFIG.ROTATE_AFTER_REQUESTS,
+      rotateAfterSeconds: Math.floor(FINGERPRINT_CONFIG.ROTATE_AFTER_MS / 1000),
+    });
+  }
+  return entries;
 }
 
 export function getDeviceIdForToken(token) {
