@@ -878,7 +878,7 @@ async function loadApiKeys() {
       return;
     }
     body.innerHTML = data.keys.map(k => `<tr>
-      <td>${k.masked}</td>
+      <td>${k.key}</td>
       <td><button class="btn btn-del" style="background:var(--red);padding:3px 12px" data-id="${k.id}">删除</button></td>
     </tr>`).join('');
     body.querySelectorAll('button[data-id]').forEach(btn =>
