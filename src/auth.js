@@ -98,6 +98,7 @@ for (const acct of accounts) {
 }
 
 import { loginHeaders, getHeaders, getDeviceId, proxiedFetch, getDeviceIdForToken } from './headers.js';
+import { loginProxiedFetch } from './proxy.js';
 
 async function login(account, password) {
   // Use a fresh deviceId for login — real browser gets it from portal101.cn device fingerprint
@@ -111,7 +112,9 @@ async function login(account, password) {
     ? { email: '', mobile: normalized.replace(/[\s-]/g, ''), password, area_code: '', device_id: loginDeviceId, os: 'web' }
     : { email: normalized, mobile: '', password, area_code: '', device_id: loginDeviceId, os: 'web' };
 
-  const res = await proxiedFetch(`${BASE_URL}/api/v0/users/login`, {
+  // Use login-specific proxy (xiequ/manual) to bypass WAF
+  // Note: acquireLoginProxy() fetches a fresh proxy from xiequ API each time (short-lived proxies)
+  const res = await loginProxiedFetch(`${BASE_URL}/api/v0/users/login`, {
     method: 'POST',
     headers: loginHeaders(),
     body: JSON.stringify(loginBody),

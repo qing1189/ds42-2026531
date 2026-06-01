@@ -466,6 +466,39 @@ footer {
 
   <!-- 面板密码 -->
   <div class="card">
+    <h2>登录代理</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">仅用于添加账号时登录（绕过 WAF），不影响 API 转发</p>
+    <div id="proxyStatus" style="font-size:0.88em;margin-bottom:12px;padding:8px 12px;background:var(--bg);border-radius:4px">加载中...</div>
+    <div class="forms-row">
+      <div>
+        <h3 style="font-size:0.92em;margin-bottom:8px">手动代理</h3>
+        <form id="manualProxyForm">
+          <div class="form-group">
+            <label>代理地址</label>
+            <input type="text" id="manualProxyInput" placeholder="ip:port 或 user:pass@ip:port">
+          </div>
+          <button type="submit" class="btn">保存</button>
+          <button type="button" class="btn" style="background:var(--border);margin-left:6px" onclick="checkManualProxy()">检测</button>
+          <div class="msg" id="manualProxyMsg"></div>
+        </form>
+      </div>
+      <div>
+        <h3 style="font-size:0.92em;margin-bottom:8px">携趣短效代理</h3>
+        <form id="xiequForm">
+          <div class="form-group">
+            <label>API 提取地址</label>
+            <input type="text" id="xiequApiInput" placeholder="http://api.xiequ.cn/...">
+          </div>
+          <button type="submit" class="btn">保存</button>
+          <button type="button" class="btn" style="background:var(--border);margin-left:6px" onclick="testXiequ()">提取测试</button>
+          <div class="msg" id="xiequMsg"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 面板密码 -->
+  <div class="card">
     <h2>面板密码</h2>
     <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:10px">用于登录本管理面板，与 API Key <strong>相互独立</strong>。设置后访问面板需输入此密码。修改将使现有登录失效。</p>
     <form id="passwordForm">
@@ -962,12 +995,138 @@ $('passwordForm').addEventListener('submit', async e => {
   }
 });
 
+// ---- Login Proxy management ----
+async function fetchProxyConfig() {
+  try {
+    const res = await apiFetch('/admin/api/proxy');
+    if (!res.ok) throw new Error('');
+    const d = await res.json();
+    if (d.success) {
+      $('manualProxyInput').value = d.manualProxy || '';
+      $('xiequApiInput').value = d.xiequApiUrl || '';
+      const parts = [];
+      if (d.xiequApiUrl) parts.push('<span style="color:var(--green)">携趣:已配置</span>');
+      if (d.manualProxy) parts.push('<span style="color:var(--accent)">手动:' + d.manualProxy + '</span>');
+      if (!d.xiequApiUrl && !d.manualProxy) parts.push('<span style="color:var(--text-dim)">未配置（直连）</span>');
+      $('proxyStatus').innerHTML = '状态: ' + parts.join(' · ');
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('fetchProxyConfig error:', e);
+  }
+}
+
+$('manualProxyForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const proxyUrl = $('manualProxyInput').value.trim();
+  const msgEl = $('manualProxyMsg');
+  msgEl.textContent = '保存中...';
+  msgEl.className = 'msg';
+  try {
+    const res = await apiFetch('/admin/api/proxy/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proxyUrl }),
+    });
+    const d = await res.json();
+    if (d.success) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = d.message;
+      fetchProxyConfig();
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = d.error?.message || '失败';
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
+  }
+});
+
+async function checkManualProxy() {
+  const p = $('manualProxyInput').value.trim();
+  const msgEl = $('manualProxyMsg');
+  if (!p) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = '请输入代理地址';
+    return;
+  }
+  msgEl.textContent = '检测中...';
+  msgEl.className = 'msg';
+  try {
+    const res = await apiFetch('/admin/api/proxy/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proxyUrl: p }),
+    });
+    const d = await res.json();
+    if (d.ok) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = `可用！延迟: ${d.latency}ms${d.note ? ' (' + d.note + ')' : ''}`;
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = '不可用: ' + (d.error || '未知错误');
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '检测失败';
+  }
+}
+
+$('xiequForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const apiUrl = $('xiequApiInput').value.trim();
+  const msgEl = $('xiequMsg');
+  msgEl.textContent = '保存中...';
+  msgEl.className = 'msg';
+  try {
+    const res = await apiFetch('/admin/api/proxy/xiequ', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiUrl }),
+    });
+    const d = await res.json();
+    if (d.success) {
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = d.message;
+      fetchProxyConfig();
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = d.error?.message || '失败';
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
+  }
+});
+
+async function testXiequ() {
+  const msgEl = $('xiequMsg');
+  msgEl.textContent = '提取中...';
+  msgEl.className = 'msg';
+  try {
+    const res = await apiFetch('/admin/api/proxy/xiequ/test', { method: 'POST' });
+    const d = await res.json();
+    if (d.success) {
+      const c = d.check?.ok ? `可用, ${d.check.latency}ms` : `不可用: ${d.check?.error || ''}`;
+      msgEl.className = 'msg msg-ok';
+      msgEl.textContent = `${d.proxy} (${c})`;
+    } else {
+      msgEl.className = 'msg msg-err';
+      msgEl.textContent = d.error?.message || '提取失败';
+    }
+  } catch (err) {
+    msgEl.className = 'msg msg-err';
+    msgEl.textContent = err.message === 'unauthorized' ? '认证失败' : '请求失败';
+  }
+}
+
 // ---- Bootstrap ----
 function startPanel() {
   fetchStats();
   fetchAccounts();
   setupRefresh();
   loadApiKeys();
+  fetchProxyConfig();
 }
 
 async function boot() {
