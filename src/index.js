@@ -10,7 +10,7 @@ import { getQueueInfo } from './queue.js';
 import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChatLogs, listLogDates } from './logger.js';
 import { getMetrics, getTimeseries } from './metrics.js';
 import {
-  hasApiKeys, isValidApiKey, listApiKeysMasked, addApiKey, removeApiKeyById,
+  hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
   getFirstApiKey,
 } from './access.js';
@@ -81,8 +81,8 @@ app.get('/playground', (req, res) => {
   res.sendFile(join(__dirname, 'playground', 'index.html'));
 });
 
-// Playground: get default API key for auto-fill (panel auth protected)
-app.get('/playground/api/default-key', panelAuth, (req, res) => {
+// Playground: get default API key for auto-fill (no auth — same-origin only)
+app.get('/playground/api/default-key', (req, res) => {
   res.json({ key: getFirstApiKey() });
 });
 
@@ -244,7 +244,7 @@ app.post('/admin/api/session/auto-delete', (req, res) => {
 
 // Admin: API key management (hot-reload)
 app.get('/admin/api/apikeys', (req, res) => {
-  res.json({ keys: listApiKeysMasked() });
+  res.json({ keys: listApiKeysPlain() });
 });
 
 app.post('/admin/api/apikeys/add', (req, res) => {

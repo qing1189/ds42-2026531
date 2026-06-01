@@ -47,6 +47,11 @@ export function listApiKeysMasked() {
   return [...apiKeys].map(k => ({ id: keyId(k), masked: maskKey(k) }));
 }
 
+// Full plaintext list for the admin UI (no masking): { id, key }
+export function listApiKeysPlain() {
+  return [...apiKeys].map(k => ({ id: keyId(k), key: k }));
+}
+
 // Add an explicit key, or generate one when no key is provided.
 // Returns { added, generated, key? }.
 export function addApiKey(key) {
