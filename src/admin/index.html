@@ -497,6 +497,42 @@ footer {
     </div>
   </div>
 
+  <!-- 智能调度 -->
+  <div class="card">
+    <h2>智能调度</h2>
+    <p style="font-size:0.82em;color:var(--text-dim);margin-bottom:12px">权重调度 + 冷却保护 + 请求间隔抖动 — 降低风控触发概率</p>
+    <div class="stats-grid" style="margin-bottom:12px">
+      <div class="stat-item">
+        <div class="label">最小间隔</div>
+        <div class="value" id="schMinInterval">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">频率限制</div>
+        <div class="value" id="schRateLimit">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">冷却时长</div>
+        <div class="value" id="schCooldown">-</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">冷却阈值</div>
+        <div class="value" id="schThreshold">-</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
+      <button class="btn" style="background:var(--border);padding:4px 14px;font-size:0.8em" id="schConfigBtn">调参</button>
+      <button class="btn" style="background:var(--red);padding:4px 14px;font-size:0.8em" id="schResetAllBtn">全部重置</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>令牌</th><th>权重</th><th>状态</th><th>调度次</th><th>近1分钟</th><th>成功/失败</th><th>操作</th></tr></thead>
+        <tbody id="schBody">
+          <tr><td colspan="7" style="color:var(--text-dim)">无数据</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- 面板密码 -->
   <div class="card">
     <h2>用量统计</h2>
@@ -724,12 +760,12 @@ function setupRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const ms = parseInt($('interval').value);
   if (ms > 0) {
-    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); fetchUsage(); }, ms);
+    refreshTimer = setInterval(() => { fetchStats(); fetchAccounts(); fetchUsage(); fetchScheduler(); }, ms);
   }
 }
 
 $('interval').addEventListener('change', setupRefresh);
-$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); fetchUsage(); });
+$('refreshBtn').addEventListener('click', () => { fetchStats(); fetchAccounts(); fetchUsage(); fetchScheduler(); });
 $('clearSessionsBtn').addEventListener('click', clearSessions);
 
 // Auto-delete mode
@@ -1042,6 +1078,125 @@ $('passwordForm').addEventListener('submit', async e => {
   }
 });
 
+// ---- Smart Scheduler ----
+async function fetchScheduler() {
+  try {
+    const res = await apiFetch('/admin/api/scheduler');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) return;
+
+    const cfg = data.config;
+    $('schMinInterval').textContent = (cfg.MIN_INTERVAL / 1000).toFixed(1) + 's';
+    $('schRateLimit').textContent = cfg.RATE_LIMIT + '/' + (cfg.RATE_WINDOW / 1000) + 's';
+    $('schCooldown').textContent = (cfg.COOLDOWN_DURATION / 1000) + 's';
+    $('schThreshold').textContent = '<' + cfg.COOLDOWN_THRESHOLD;
+
+    const body = $('schBody');
+    if (!data.entries || data.entries.length === 0) {
+      body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">暂无调度数据（首次请求后出现）</td></tr>';
+      return;
+    }
+
+    body.innerHTML = data.entries.map(e => {
+      const pct = Math.round((e.weight / e.maxWeight) * 100);
+      const barColor = e.cooling ? 'var(--red)' : e.weight < cfg.COOLDOWN_THRESHOLD ? 'var(--yellow)' : 'var(--green)';
+      let status;
+      if (e.cooling) {
+        status = `<span style="color:var(--red)">冷却 ${e.cooldownRemaining}s</span>`;
+      } else if (e.weight < cfg.COOLDOWN_THRESHOLD) {
+        status = '<span style="color:var(--yellow)">低权重</span>';
+      } else {
+        status = '<span style="color:var(--green)">正常</span>';
+      }
+      return `<tr>
+        <td>${e.token}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:60px;height:8px;background:var(--bg);border-radius:4px;overflow:hidden">
+              <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px"></div>
+            </div>
+            <span style="font-size:0.85em">${e.weight}/${e.maxWeight}</span>
+          </div>
+        </td>
+        <td>${status}</td>
+        <td>${e.dispatchCount}</td>
+        <td>${e.recentRequests}/${e.rateLimit}</td>
+        <td><span style="color:var(--green)">${e.totalSuccess}</span> / <span style="color:var(--red)">${e.totalFailure}</span></td>
+        <td><button class="btn" style="background:var(--border);padding:3px 10px;font-size:0.8em" data-sch-token="${e.token.replace('...', '')}">重置</button></td>
+      </tr>`;
+    }).join('');
+
+    body.querySelectorAll('button[data-sch-token]').forEach(btn =>
+      btn.addEventListener('click', () => resetSchToken(btn.dataset.schToken)));
+  } catch (e) {
+    if (e.message !== 'unauthorized') console.error('fetchScheduler error:', e);
+  }
+}
+
+async function resetSchToken(tokenPrefix) {
+  if (!confirm('确认重置令牌 ' + tokenPrefix + '... 的调度权重？')) return;
+  try {
+    const res = await apiFetch('/admin/api/scheduler/reset/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenPrefix }),
+    });
+    const data = await res.json();
+    if (data.success) fetchScheduler();
+    else alert(data.message || '重置失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+}
+
+$('schResetAllBtn').addEventListener('click', async () => {
+  if (!confirm('确认重置所有调度状态？所有权重将恢复初始值。')) return;
+  try {
+    const res = await apiFetch('/admin/api/scheduler/reset', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) fetchScheduler();
+    else alert(data.message || '重置失败');
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('请求失败');
+  }
+});
+
+$('schConfigBtn').addEventListener('click', async () => {
+  try {
+    const res = await apiFetch('/admin/api/scheduler/config');
+    const data = await res.json();
+    if (!data.success) return;
+    const cfg = data.config;
+    const input = prompt(
+      '调度器参数（JSON 格式，仅修改需要的字段）：\n\n' +
+      '当前配置:\n' +
+      `  成功+${cfg.SUCCESS_INCREMENT} / 失败-${cfg.FAILURE_DECREMENT}\n` +
+      `  最大权重=${cfg.MAX_WEIGHT}, 冷却阈值=${cfg.COOLDOWN_THRESHOLD}\n` +
+      `  冷却时长=${cfg.COOLDOWN_DURATION/1000}s, 恢复权重=${cfg.COOLDOWN_RECOVERY_WEIGHT}\n` +
+      `  最小间隔=${cfg.MIN_INTERVAL}ms, 抖动=${cfg.MAX_JITTER}ms\n` +
+      `  频率限制=${cfg.RATE_LIMIT}次/${cfg.RATE_WINDOW/1000}s\n` +
+      `  调度差值=${cfg.MAX_DISPATCH_DIFF}\n\n` +
+      '示例: {"MIN_INTERVAL":5000,"RATE_LIMIT":8}',
+      JSON.stringify({ MIN_INTERVAL: cfg.MIN_INTERVAL, RATE_LIMIT: cfg.RATE_LIMIT })
+    );
+    if (!input) return;
+    const updates = JSON.parse(input);
+    const saveRes = await apiFetch('/admin/api/scheduler/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const saveData = await saveRes.json();
+    if (saveData.success) {
+      alert('配置已更新（' + saveData.changed + ' 个参数）');
+      fetchScheduler();
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') alert('操作失败: ' + e.message);
+  }
+});
+
 // ---- Usage Statistics ----
 function formatNumber(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -1283,6 +1438,7 @@ function startPanel() {
   loadApiKeys();
   fetchProxyConfig();
   fetchUsage();
+  fetchScheduler();
 }
 
 async function boot() {

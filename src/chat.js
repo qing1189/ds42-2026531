@@ -11,6 +11,11 @@ export async function completion({ modelType, prompt, thinkingEnabled = false, s
   const slot = await enqueueRequest(preferVision);
 
   try {
+    // Step 1.5: Respect scheduler's wait interval (anti-fingerprinting jitter)
+    if (slot.waitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, slot.waitMs));
+    }
+
     // Step 2: Solve PoW using the same token
     const { powResponse } = await solvePowChallengeWithToken(slot.token);
 

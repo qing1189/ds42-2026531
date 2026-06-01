@@ -11,6 +11,7 @@ import { requestLogger, getRecentLogs, getLogStats, readHistoricalLogs, readChat
 import { getMetrics, getTimeseries } from './metrics.js';
 import { getProxyConfig, setManualProxy, setXiequApiUrl, fetchXiequProxy, checkProxy, restoreProxyConfig } from './proxy.js';
 import { getAllUsageStats, resetAllUsage, resetApiKeyUsage, resetAccountUsage } from './usage.js';
+import { getSchedulerStatus, getSchedulerConfig, updateSchedulerConfig, resetTokenWeight, resetAllSchedulerState } from './scheduler.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, listApiKeysPlain, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
@@ -275,6 +276,36 @@ app.post('/admin/api/usage/reset/account', (req, res) => {
     return res.status(400).json({ error: { message: 'account required' } });
   }
   const result = resetAccountUsage(account);
+  if (result.success) res.json(result);
+  else res.status(400).json(result);
+});
+
+// --- Smart Scheduler (智能调度器) ---
+app.get('/admin/api/scheduler', (req, res) => {
+  res.json({ success: true, ...getSchedulerStatus() });
+});
+
+app.get('/admin/api/scheduler/config', (req, res) => {
+  res.json({ success: true, config: getSchedulerConfig() });
+});
+
+app.post('/admin/api/scheduler/config', (req, res) => {
+  const updates = req.body || {};
+  const result = updateSchedulerConfig(updates);
+  res.json(result);
+});
+
+app.post('/admin/api/scheduler/reset', (req, res) => {
+  const result = resetAllSchedulerState();
+  res.json(result);
+});
+
+app.post('/admin/api/scheduler/reset/token', (req, res) => {
+  const { token } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ error: { message: 'token (prefix) required' } });
+  }
+  const result = resetTokenWeight(token);
   if (result.success) res.json(result);
   else res.status(400).json(result);
 });
