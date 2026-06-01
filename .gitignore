@@ -1,4 +1,4 @@
-node_modules/
+﻿node_modules/
 .env
 .pm2/
 __pycache__/
@@ -10,3 +10,4 @@ pow_wasm_worker.js
 tmp_main.js
 tmp_js_worker.js
 tmp_wasm_worker.js
+logs/
