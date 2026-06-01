@@ -132,3 +132,9 @@ export function getAccessConfig() {
     apiKeyCount: apiKeys.size,
   };
 }
+
+// Get the first configured API key (full value) for internal use (e.g. playground).
+export function getFirstApiKey() {
+  if (apiKeys.size === 0) return '';
+  return [...apiKeys][0];
+}

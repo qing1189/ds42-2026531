@@ -12,6 +12,7 @@ import { getMetrics, getTimeseries } from './metrics.js';
 import {
   hasApiKeys, isValidApiKey, listApiKeysMasked, addApiKey, removeApiKeyById,
   panelAuthRequired, verifyPanelPassword, createPanelSession, isValidPanelSession, setPanelPassword, getAccessConfig,
+  getFirstApiKey,
 } from './access.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -78,6 +79,11 @@ app.get('/performance', (req, res) => {
 });
 app.get('/playground', (req, res) => {
   res.sendFile(join(__dirname, 'playground', 'index.html'));
+});
+
+// Playground: get default API key for auto-fill (panel auth protected)
+app.get('/playground/api/default-key', panelAuth, (req, res) => {
+  res.json({ key: getFirstApiKey() });
 });
 
 // ---- Public panel endpoints (must be registered BEFORE the panelAuth guard)

@@ -500,6 +500,22 @@ $('apiKeyInput').addEventListener('change', () => {
   sessionStorage.setItem('playground_api_key', $('apiKeyInput').value);
 });
 
+// Auto-load default API key from server config
+async function loadDefaultApiKey() {
+  // If user already has a saved key, don't overwrite
+  if ($('apiKeyInput').value.trim()) return;
+  try {
+    const res = await fetch('/playground/api/default-key');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.key) {
+      $('apiKeyInput').value = data.key;
+      sessionStorage.setItem('playground_api_key', data.key);
+    }
+  } catch {}
+}
+loadDefaultApiKey();
+
 // Fetch models dynamically
 async function loadModels() {
   try {
@@ -523,7 +539,9 @@ async function loadModels() {
     }
   } catch {}
 }
-loadModels();
+
+// Load default key first, then models (so models request uses the key)
+loadDefaultApiKey().then(() => loadModels());
 </script>
 </body>
 </html>
